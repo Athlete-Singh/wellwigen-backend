@@ -130,9 +130,57 @@ export const updateAvailability = async (req, res, next) => {
 // Get all pending provider applications
 export const getPendingProviders = async (req, res, next) => {
   try {
-    const providers = await Provider.find({ verificationStatus: "pending" }).sort("-createdAt");
+    const providers = await Provider.find({ 
+      verificationStatus: { $in: ["pending", "under_review"] } 
+    }).sort("-createdAt");
     res.status(200).json({ success: true, data: providers });
   } catch (err) {
+    next(err);
+  }
+};
+
+// Get all approved/active provider applications
+export const getApprovedProviders = async (req, res, next) => {
+  try {
+    console.log("🔍 FETCHING_APPROVED_PROVIDERS...");
+    const providers = await Provider.find({ verificationStatus: "approved" }).sort("-createdAt");
+    console.log(`✅ FOUND_${providers.length}_APPROVED_PROVIDERS`);
+    res.status(200).json({ success: true, data: providers });
+  } catch (err) {
+    console.error("❌ GET_APPROVED_ERROR:", err);
+    next(err);
+  }
+};
+
+// Get all providers (regardless of status)
+export const getAllProviders = async (req, res, next) => {
+  try {
+    const providers = await Provider.find().sort("-createdAt");
+    res.status(200).json({ success: true, data: providers });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Delete a provider permanently
+export const deleteProvider = async (req, res, next) => {
+  try {
+    const { providerId } = req.params;
+    console.log(`🗑️ DELETING_PROVIDER: ${providerId}`);
+
+    const provider = await Provider.findByIdAndDelete(providerId);
+    if (!provider) {
+      console.log(`❌ PROVIDER_NOT_FOUND: ${providerId}`);
+      return res.status(404).json({ success: false, message: "Provider not found" });
+    }
+
+    console.log(`✅ PROVIDER_DELETED: ${provider.businessName}`);
+    res.status(200).json({
+      success: true,
+      message: "Provider removed successfully"
+    });
+  } catch (err) {
+    console.error("❌ DELETE_ERROR:", err);
     next(err);
   }
 };
@@ -142,15 +190,20 @@ export const verifyProvider = async (req, res, next) => {
   try {
     const { providerId } = req.params;
     const { status } = req.body; // 'approved' or 'rejected'
+    console.log(`📝 VERIFYING_PROVIDER: ${providerId} to status: ${status}`);
 
     const provider = await Provider.findById(providerId);
-    if (!provider) return res.status(404).json({ success: false, message: "Provider not found" });
+    if (!provider) {
+      console.log(`❌ PROVIDER_NOT_FOUND: ${providerId}`);
+      return res.status(404).json({ success: false, message: "Provider not found" });
+    }
 
     provider.verificationStatus = status;
     provider.isVerified = status === 'approved';
     provider.isActive = status === 'approved';
 
     await provider.save();
+    console.log(`✅ PROVIDER_UPDATED: ${provider.businessName} is now ${status}`);
 
     res.status(200).json({
       success: true,
@@ -158,6 +211,7 @@ export const verifyProvider = async (req, res, next) => {
       data: provider
     });
   } catch (err) {
+    console.error("❌ VERIFY_ERROR:", err);
     next(err);
   }
 };

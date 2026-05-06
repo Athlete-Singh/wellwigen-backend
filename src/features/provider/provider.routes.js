@@ -5,9 +5,13 @@ import {
   uploadDocuments,
   getMyProfile,
   updateAvailability,
-  loginProvider
+  loginProvider,
+  getPendingProviders,
+  getApprovedProviders,
+  getAllProviders,
+  verifyProvider,
+  deleteProvider
 } from "./provider.controller.js";
-import { getPendingProviders, verifyProvider } from "./provider.controller.js";
 
 const router = express.Router();
 
@@ -20,6 +24,9 @@ router.put("/availability/:providerId", updateAvailability);
 
 // Admin Routes
 router.get("/admin/pending", getPendingProviders);
+router.get("/admin/active", getApprovedProviders);
+router.get("/admin/all", getAllProviders);
 router.put("/admin/verify/:providerId", verifyProvider);
+router.delete("/admin/remove/:providerId", deleteProvider);
 
 export default router;
