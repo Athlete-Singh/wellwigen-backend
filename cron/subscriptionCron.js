@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import Subscription from "../src/features/subscription/subscription.model.js";
 import Order from "../src/features/automation/order.model.js";
+import { ioInstance } from "../server.js";
 
 /**
  * Helper: Get today's day name in "Asia/Kolkata" (e.g., "Mon", "Tue")
@@ -49,7 +50,7 @@ export const runDailyOrderCreation = async () => {
       });
 
       if (!existingOrder) {
-        await Order.create({
+        const newOrder = await Order.create({
           userId: sub.userId,
           subscriptionId: sub._id,
           productId: sub.productId,
@@ -58,7 +59,22 @@ export const runDailyOrderCreation = async () => {
           status: "pending",
           type: "produce", 
         });
+        
         console.log(`✅ Order created: User ${sub.userId} | Sub ${sub._id}`);
+
+        // Notify Vendor in Real-time
+        if (ioInstance) {
+          console.log(`📡 Notifying vendor about new order for user ${sub.userId}`);
+          ioInstance.emit("newOrder", {
+            id: newOrder._id,
+            customer: "Subscriber", // Ideally fetch user name
+            plan: sub.plan || "Subscription",
+            product: "Fresh Produce Box",
+            date: todayDate.toLocaleDateString(),
+            status: "Pending",
+            type: "Subscription"
+          });
+        }
       } else {
         console.log(`⚠️ Skipping: Order already exists for User ${sub.userId} today.`);
       }

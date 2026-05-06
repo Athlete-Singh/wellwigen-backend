@@ -12,6 +12,8 @@ import { startAutomationEngine } from "./src/core/jobs/orderEngine.js";
 // ✅ Initialize Subscription & Order Cron Jobs
 import "./cron/subscriptionCron.js";
 
+export let ioInstance;
+
 // Routes
 import subscriptionRoutes from "./src/features/subscription/subscription.routes.js";
 import providerRoutes from "./src/features/provider/provider.routes.js";
@@ -70,6 +72,7 @@ const io = new Server(server, {
     credentials: true,
   },
 });
+ioInstance = io;
 
 let users = {};
 
@@ -82,6 +85,14 @@ io.on("connection", (socket) => {
   socket.on("registerUser", (userId) => {
     users[userId] = socket.id;
     console.log("✅ User mapped:", userId, socket.id);
+  });
+
+  // Re-broadcast order status updates (for real-time sync between vendor/user dashboards)
+  socket.on("updateOrderStatus", (data) => {
+    console.log("📡 [SOCKET_REBROADCAST] Received updateOrderStatus from client:", data);
+    const clientsCount = io.engine.clientsCount;
+    console.log(`📡 [SOCKET_REBROADCAST] Broadcasting 'orderStatusUpdated' to ${clientsCount} clients...`);
+    io.emit("orderStatusUpdated", data);
   });
 
   socket.on("disconnect", () => {
