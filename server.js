@@ -10,7 +10,7 @@ import dotenv from "dotenv";
 import { startAutomationEngine } from "./src/core/jobs/orderEngine.js";
 
 // ✅ Initialize Subscription & Order Cron Jobs
-import "./cron/subscriptionCron.js";
+import { initSubscriptionSocket } from "./cron/subscriptionCron.js";
 
 export let ioInstance;
 
@@ -22,6 +22,11 @@ import productRoutes from "./src/features/product/product.routes.js";
 import deliveryRoutes from "./src/features/delivery/delivery.routes.js";
 import categoryRoutes from "./src/features/category/category.routes.js";
 import orderRoutes from "./src/features/automation/order.routes.js";
+import userRoutes from "./src/features/user/user.routes.js";
+import User from "./src/features/user/user.model.js";
+import Subscription from "./src/features/subscription/subscription.model.js";
+import Order from "./src/features/automation/order.model.js";
+import Provider from "./src/features/provider/provider.model.js";
 
 dotenv.config();
 
@@ -73,6 +78,7 @@ const io = new Server(server, {
   },
 });
 ioInstance = io;
+initSubscriptionSocket(io);
 
 let users = {};
 
@@ -115,6 +121,7 @@ app.use("/api/subscription", subscriptionRoutes);
 app.use("/api/provider", providerRoutes);
 app.use("/api/category", categoryRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/user", userRoutes);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -141,7 +148,33 @@ mongoose
   .connect(process.env.MONGO_URL, { dbName: "wellwigen" })
   .then(() => {
     console.log("✅ MongoDB Connected");
-    // startAutomationEngine();
+    
+    // Immediate Health Check & Sync on Startup
+    const performStartupSync = async () => {
+      try {
+        const User = mongoose.model("User");
+        const Subscription = mongoose.model("Subscription");
+        const Order = mongoose.model("Order");
+        const Provider = mongoose.model("Provider");
+
+        const counts = {
+          users: await User.countDocuments(),
+          vendors: await Provider.countDocuments(),
+          subscriptions: await Subscription.countDocuments({ status: "active" }),
+          orders: await Order.countDocuments()
+        };
+
+        console.log("📊 [STARTUP] System Health Check:", counts);
+        
+        const { runDailyOrderCreation } = await import("./cron/subscriptionCron.js");
+        console.log("⚙️ [STARTUP] Triggering immediate Order Creation Sync...");
+        await runDailyOrderCreation();
+        console.log("✅ [STARTUP] Sync complete.");
+      } catch (err) {
+        console.error("❌ [STARTUP] Error during health check/sync:", err.message);
+      }
+    };
+    performStartupSync();
   })
   .catch((err) => console.log("❌ MongoDB Error:", err));
 

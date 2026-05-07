@@ -1,7 +1,18 @@
 import cron from "node-cron";
 import Subscription from "../src/features/subscription/subscription.model.js";
 import Order from "../src/features/automation/order.model.js";
-import { ioInstance } from "../server.js";
+import Provider from "../src/features/provider/provider.model.js";
+import razorpayInstance from "../src/core/config/razorpay.js";
+// import { ioInstance } from "../server.js"; // Removed direct import to fix circular dependency
+let ioInstance = null;
+
+/**
+ * Initialize the socket instance for the cron module
+ */
+export const initSubscriptionSocket = (io) => {
+  console.log("🔌 [CRON] Socket instance initialized");
+  ioInstance = io;
+};
 
 /**
  * Helper: Get today's day name in "Asia/Kolkata" (e.g., "Mon", "Tue")
@@ -20,7 +31,14 @@ const getTodayDateKolkata = () => {
   const dateStr = new Date().toLocaleDateString("en-CA", {
     timeZone: "Asia/Kolkata",
   }); // Returns YYYY-MM-DD
-  return new Date(dateStr);
+  return new Date(dateStr + "T00:00:00.000Z");
+};
+
+const getEndOfTodayKolkata = () => {
+  const dateStr = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Kolkata",
+  }); // Returns YYYY-MM-DD
+  return new Date(dateStr + "T23:59:59.999Z");
 };
 
 // ============================================================
@@ -31,55 +49,80 @@ export const runDailyOrderCreation = async () => {
   console.log("⚙️ [MANUAL/CRON] Running Daily Order Creation Logic...");
   try {
     const todayDay = getTodayDayName();
-    const todayDate = getTodayDateKolkata();
+    const startOfToday = getTodayDateKolkata();
+    const endOfToday = getEndOfTodayKolkata();
 
     const activeSubscriptions = await Subscription.find({
-      status: "active",
-      deliveryDays: todayDay,
-      startDate: { $lte: todayDate },
-      endDate: { $gte: todayDate },
-    });
+      status: { $in: ["active", "pending", "Active", "Pending"] }, 
+      startDate: { $lte: endOfToday },
+      endDate: { $gte: startOfToday },
+    }).populate("userId");
 
-    console.log(`🔍 Found ${activeSubscriptions.length} subscriptions for ${todayDay}`);
+    console.log(`🔍 [CRON] Found ${activeSubscriptions.length} subscriptions matching criteria.`);
+    
+    if (activeSubscriptions.length === 0) {
+        console.log("⚠️ [CRON] No candidate subscriptions found matching current date criteria.");
+    }
 
+    // Relaxed vendor check for testing/flexibility: 
+    // Orders will be created as 'pending' regardless of current vendor status.
+    const hasActiveVendors = true; 
+    console.log(`📡 Order generation mode: Open to all vendors.`);
+
+    // Pre-generate orders for the next 7 days (Upcoming Orders)
+    const daysToPredict = 7;
+    
     for (const sub of activeSubscriptions) {
-      const existingOrder = await Order.findOne({
-        userId: sub.userId,
-        productId: sub.productId,
-        scheduledFor: todayDate,
-      });
-
-      if (!existingOrder) {
-        const newOrder = await Order.create({
-          userId: sub.userId,
-          subscriptionId: sub._id,
-          productId: sub.productId,
-          quantity: sub.quantity || 1,
-          scheduledFor: todayDate,
-          status: "pending",
-          type: "produce", 
-        });
+      const actualUserId = sub.userId?._id || sub.userId;
+      
+      for (let i = 0; i < daysToPredict; i++) {
+        const targetDate = new Date(startOfToday);
+        targetDate.setDate(startOfToday.getDate() + i);
         
-        console.log(`✅ Order created: User ${sub.userId} | Sub ${sub._id}`);
+        const existingOrder = await Order.findOne({
+          userId: actualUserId,
+          subscriptionId: sub._id,
+          scheduledFor: {
+            $gte: new Date(new Date(targetDate).setHours(0,0,0,0)),
+            $lte: new Date(new Date(targetDate).setHours(23,59,59,999))
+          },
+        });
 
-        // Notify Vendor in Real-time
-        if (ioInstance) {
-          console.log(`📡 Notifying vendor about new order for user ${sub.userId}`);
-          ioInstance.emit("newOrder", {
-            id: newOrder._id,
-            customer: "Subscriber", // Ideally fetch user name
-            plan: sub.plan || "Subscription",
-            product: "Fresh Produce Box",
-            date: todayDate.toLocaleDateString(),
-            status: "Pending",
-            type: "Subscription"
+        if (!existingOrder) {
+          if (!hasActiveVendors) {
+            console.log(`⚠️ No active vendors! Skipping order for User ${actualUserId} on ${targetDate.toDateString()}`);
+            continue;
+          }
+
+          const newOrder = await Order.create({
+            userId: actualUserId,
+            subscriptionId: sub._id,
+            scheduledFor: new Date(targetDate.setHours(0,0,0,0)),
+            status: "pending",
+            type: "produce",
+            items: [{ name: sub.plan, quantity: 1 }]
           });
+          
+          console.log(`✅ [CRON] Order ${newOrder._id} created for User ${actualUserId} on ${targetDate.toDateString()}`);
+
+          // Notify vendors of the NEW order (even if it's for a future date)
+          if (ioInstance) {
+            const broadcastData = {
+              id: newOrder._id,
+              customer: sub.userId?.name || "Subscriber", 
+              product: sub.plan || "Fresh Produce Box",
+              date: targetDate.toLocaleDateString(),
+              status: "Pending",
+              type: i === 0 ? "Order" : "Upcoming"
+            };
+
+            console.log(`📡 Broadcasting ${broadcastData.type} order to all vendors: User ${actualUserId} | Date ${broadcastData.date}`);
+            ioInstance.emit("newOrder", broadcastData);
+          }
         }
-      } else {
-        console.log(`⚠️ Skipping: Order already exists for User ${sub.userId} today.`);
       }
     }
-    return { success: true, message: `Checked ${activeSubscriptions.length} subscriptions.` };
+    return { success: true, message: `Processed ${activeSubscriptions.length} subscriptions for the next ${daysToPredict} days.` };
   } catch (error) {
     console.error("❌ Error in runDailyOrderCreation:", error);
     return { success: false, error: error.message };
@@ -115,23 +158,108 @@ export const runAutoUpdateOrderStatus = async () => {
 export const runSubscriptionExpiryCheck = async () => {
   console.log("⚙️ [MANUAL/CRON] Running Subscription Expiry Check Logic...");
   try {
-    const todayDate = getTodayDateKolkata();
+    const currentTime = new Date();
+    
+    // 1. Check for Subscriptions Expiring Soon (e.g., within 2 minutes for testing)
+    const warningWindow = new Date(currentTime);
+    warningWindow.setMinutes(warningWindow.getMinutes() + 2);
 
-    const result = await Subscription.updateMany(
-      {
-        status: "active",
-        endDate: { $lt: todayDate },
-      },
-      {
-        $set: { status: "expired" },
+    const expiringSoonSubs = await Subscription.find({
+      status: "active",
+      endDate: { $gt: currentTime, $lte: warningWindow }
+    });
+
+    if (expiringSoonSubs.length > 0) {
+      console.log(`⚠️ Found ${expiringSoonSubs.length} subscriptions expiring soon.`);
+      if (ioInstance) {
+        expiringSoonSubs.forEach(sub => {
+          ioInstance.emit("subscriptionExpiringSoon", {
+            userId: sub.userId,
+            subscriptionId: sub._id,
+            plan: sub.plan,
+            endDate: sub.endDate,
+            message: `Your ${sub.plan} subscription is expiring soon on ${new Date(sub.endDate).toLocaleDateString()}.`
+          });
+        });
       }
-    );
+    }
 
-    console.log(`✅ Expired ${result.modifiedCount} subscriptions where endDate < today`);
-    return { success: true, modifiedCount: result.modifiedCount };
+    // 2. Handle Expired Subscriptions
+    const expiredSubs = await Subscription.find({
+      status: "active",
+      endDate: { $lt: currentTime },
+    });
+
+    if (expiredSubs.length > 0) {
+      console.log(`🛑 Found ${expiredSubs.length} expired subscriptions. Processing cancellations...`);
+
+      for (const sub of expiredSubs) {
+        try {
+          // Cancel on Razorpay if applicable
+          if (sub.razorpaySubscriptionId) {
+             await razorpayInstance.subscriptions.cancel(sub.razorpaySubscriptionId);
+             console.log(`✅ Cancelled Razorpay subscription: ${sub.razorpaySubscriptionId}`);
+          }
+        } catch (rzpErr) {
+          console.error(`❌ Failed to cancel Razorpay subscription for ${sub._id}:`, rzpErr.message);
+          // We still continue to mark it expired locally
+        }
+
+        // Update local status
+        sub.status = "expired";
+        await sub.save();
+
+        // Notify user via Socket
+        if (ioInstance) {
+          ioInstance.emit("subscriptionExpired", {
+            userId: sub.userId,
+            subscriptionId: sub._id,
+            plan: sub.plan,
+            message: `Your ${sub.plan} subscription has expired. Delivery services have been paused.`
+          });
+        }
+      }
+      console.log(`✅ Successfully processed ${expiredSubs.length} expired subscriptions.`);
+    } else {
+       console.log(`✅ No expired subscriptions found today.`);
+    }
+
+    return { success: true, expiredCount: expiredSubs.length, expiringSoonCount: expiringSoonSubs.length };
   } catch (error) {
     console.error("❌ Error in runSubscriptionExpiryCheck:", error);
     return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Logic: Find all pending orders and remind active vendors via socket re-broadcast
+ */
+export const runVendorReminders = async () => {
+  console.log("🔔 [CRON] Checking for pending orders to remind vendors...");
+  try {
+    const pendingOrders = await Order.find({ status: "pending" }).populate("userId");
+    
+    if (pendingOrders.length === 0) {
+      console.log("✅ No pending orders requiring reminders.");
+      return;
+    }
+
+    console.log(`📡 Re-broadcasting ${pendingOrders.length} pending orders to all active vendors...`);
+    
+    for (const order of pendingOrders) {
+      if (ioInstance) {
+        ioInstance.emit("newOrder", {
+          id: order._id,
+          customer: order.userId?.name || "Subscriber",
+          product: order.items?.[0]?.name || "Fresh Produce Box",
+          date: new Date(order.scheduledFor).toLocaleDateString(),
+          status: "Pending",
+          type: "Reminder"
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error in runVendorReminders:", error);
   }
 };
 
@@ -139,7 +267,7 @@ export const runSubscriptionExpiryCheck = async () => {
 // Cron Job Registrations
 // ============================================================
 
-export const dailyOrderCreationTask = cron.schedule("0 6 * * *", runDailyOrderCreation, {
+export const dailyOrderCreationTask = cron.schedule("*/3 * * * *", runDailyOrderCreation, {
   scheduled: true,
   timezone: "Asia/Kolkata",
 });
@@ -149,7 +277,12 @@ export const autoUpdateOrderStatusTask = cron.schedule("0 20 * * *", runAutoUpda
   timezone: "Asia/Kolkata",
 });
 
-export const subscriptionExpiryCheckTask = cron.schedule("0 0 * * *", runSubscriptionExpiryCheck, {
+export const subscriptionExpiryCheckTask = cron.schedule("*/3 * * * *", runSubscriptionExpiryCheck, {
+  scheduled: true,
+  timezone: "Asia/Kolkata",
+});
+
+export const vendorReminderTask = cron.schedule("*/3 * * * *", runVendorReminders, {
   scheduled: true,
   timezone: "Asia/Kolkata",
 });

@@ -81,11 +81,9 @@ export const verifyPayment = async (req, res, next) => {
 
     subscription.status = "active";
     subscription.startDate = new Date();
-    
+    // FOR TESTING: Set endDate to 30 days from now
     const endDate = new Date();
-    if (subscription.billingCycle === "monthly") endDate.setMonth(endDate.getMonth() + 1);
-    else if (subscription.billingCycle === "quarterly") endDate.setMonth(endDate.getMonth() + 3);
-    else if (subscription.billingCycle === "annual") endDate.setFullYear(endDate.getFullYear() + 1);
+    endDate.setDate(endDate.getDate() + 30);
     
     subscription.endDate = endDate;
     subscription.nextRenewalDate = endDate;
@@ -149,6 +147,65 @@ export const pauseSubscription = async (req, res, next) => {
     await subscription.save();
 
     res.status(200).json({ success: true, message: "Subscription paused successfully", data: subscription });
+  } catch (err) {
+    next(err);
+  }
+};
+export const getSubscription = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const subscriptions = await Subscription.find({ userId });
+    res.status(200).json({ success: true, data: subscriptions });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ Dev/testing: directly activate a subscription without Razorpay
+export const activateSubscriptionDirect = async (req, res, next) => {
+  try {
+    const { subscriptionId } = req.params;
+    const sub = await Subscription.findById(subscriptionId);
+    if (!sub) return res.status(404).json({ success: false, message: "Subscription not found" });
+
+    sub.status = "active";
+    sub.startDate = new Date();
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + 30);
+    sub.endDate = endDate;
+    sub.nextRenewalDate = endDate;
+    await sub.save();
+
+    res.json({ success: true, message: "Subscription activated directly!", data: sub });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ Dev/testing: create + immediately activate a subscription for any userId
+export const createAndActivateSubscription = async (req, res, next) => {
+  try {
+    const { userId, plan = "fit_start", billingCycle = "monthly" } = req.body;
+    if (!userId) return res.status(400).json({ success: false, message: "userId required" });
+
+    // Remove any existing pending subscriptions for this user
+    await Subscription.deleteMany({ userId, status: "pending" });
+
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + 30);
+
+    const sub = await Subscription.create({
+      userId,
+      plan,
+      billingCycle,
+      price: 499,
+      status: "active",
+      startDate: new Date(),
+      endDate,
+      nextRenewalDate: endDate
+    });
+
+    res.json({ success: true, message: "Subscription created and activated!", data: sub });
   } catch (err) {
     next(err);
   }
