@@ -73,7 +73,8 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: "*", // Allow all origins for debugging sockets
+    methods: ["GET", "POST"],
     credentials: true,
   },
 });
@@ -86,18 +87,19 @@ app.set("io", io);
 app.set("users", users);
 
 io.on("connection", (socket) => {
-  console.log("🔌 User connected:", socket.id);
+  console.log("🔌 [SOCKET] New Connection:", socket.id);
 
   socket.on("registerUser", (userId) => {
-    users[userId] = socket.id;
-    console.log("✅ User mapped:", userId, socket.id);
+    if (userId) {
+      const userIdStr = userId.toString();
+      users[userIdStr] = socket.id;
+      console.log(`✅ [SOCKET] User ${userIdStr} mapped to socket ${socket.id}`);
+    }
   });
 
-  // Re-broadcast order status updates (for real-time sync between vendor/user dashboards)
+  // Re-broadcast order status updates (Fallback mechanism)
   socket.on("updateOrderStatus", (data) => {
-    console.log("📡 [SOCKET_REBROADCAST] Received updateOrderStatus from client:", data);
-    const clientsCount = io.engine.clientsCount;
-    console.log(`📡 [SOCKET_REBROADCAST] Broadcasting 'orderStatusUpdated' to ${clientsCount} clients...`);
+    console.log("📡 [SOCKET_REBROADCAST] Global update:", data);
     io.emit("orderStatusUpdated", data);
   });
 
@@ -175,6 +177,10 @@ mongoose
       }
     };
     performStartupSync();
+    
+    // ✅ Start the Automation Engine (BullMQ Workers & Engine Cron)
+    console.log("⚙️ Starting Automation Engine...");
+    startAutomationEngine();
   })
   .catch((err) => console.log("❌ MongoDB Error:", err));
 

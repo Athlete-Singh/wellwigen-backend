@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import dns from 'dns';
+
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 import Order from './src/features/automation/order.model.js';
 import Subscription from './src/features/subscription/subscription.model.js';
 import User from './src/features/user/user.model.js';

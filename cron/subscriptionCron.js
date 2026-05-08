@@ -74,6 +74,11 @@ export const runDailyOrderCreation = async () => {
     
     for (const sub of activeSubscriptions) {
       const actualUserId = sub.userId?._id || sub.userId;
+
+      if (!actualUserId) {
+        console.log(`⚠️ [CRON] Skipping subscription ${sub._id} - No userId associated.`);
+        continue;
+      }
       
       for (let i = 0; i < daysToPredict; i++) {
         const targetDate = new Date(startOfToday);
