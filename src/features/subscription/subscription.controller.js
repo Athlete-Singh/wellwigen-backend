@@ -1,27 +1,23 @@
 import Subscription from "./subscription.model.js";
+import SubscriptionPlan from "./subscriptionPlan.model.js";
 import razorpayInstance from "../../core/config/razorpay.js";
 import crypto from "crypto";
 
-const planPrices = {
-  fit_start: { monthly: 499, quarterly: 1422, annual: 5089 },
-  healthy_life: { monthly: 999, quarterly: 2847, annual: 10189 },
-  total_wellness: { monthly: 1999, quarterly: 5697, annual: 20389 },
-};
-
 export const createSubscription = async (req, res, next) => {
   try {
-    const { userId, plan, billingCycle, members } = req.body;
+    const { userId, planId, billingCycle, members } = req.body;
     
-    // Validate
-    if (!planPrices[plan] || !planPrices[plan][billingCycle]) {
-      return res.status(400).json({ success: false, message: "Invalid plan or billing cycle" });
+    // Fetch plan from DB
+    const planDoc = await SubscriptionPlan.findById(planId);
+    if (!planDoc || planDoc.status !== "active") {
+      return res.status(404).json({ success: false, message: "Subscription plan not found or inactive" });
     }
 
-    if (plan === "total_wellness" && members?.length > 5) {
-      return res.status(400).json({ success: false, message: "Family plan allows maximum 5 members" });
+    if (!planDoc.prices[billingCycle]) {
+      return res.status(400).json({ success: false, message: "Invalid billing cycle for this plan" });
     }
 
-    const price = planPrices[plan][billingCycle];
+    const price = planDoc.prices[billingCycle];
 
     // Check if user already has an active subscription
     const existingSub = await Subscription.findOne({ userId, status: "active" });
@@ -29,10 +25,8 @@ export const createSubscription = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "You already have an active subscription" });
     }
 
-    // Note: In a production app, you would pre-create plans on Razorpay dashboard
-    // and fetch the exact plan_id using an environment map. For development, we pass a dummy.
-    const planIdKey = `RAZORPAY_PLAN_${plan.toUpperCase()}_${billingCycle.toUpperCase()}`;
-    const razorpayPlanId = process.env[planIdKey] || "plan_dummy_id_replace_later";
+    // Get Razorpay Plan ID from the doc
+    const razorpayPlanId = planDoc.razorpayPlanIds?.[billingCycle] || "plan_dummy_id_replace_later";
 
     const razorpaySub = await razorpayInstance.subscriptions.create({
       plan_id: razorpayPlanId,
@@ -42,7 +36,9 @@ export const createSubscription = async (req, res, next) => {
 
     const subscription = new Subscription({
       userId,
-      plan,
+      planId: planDoc._id,
+      plan: planDoc.name, // Storing plan name for reference
+
       price,
       billingCycle,
       status: "pending",

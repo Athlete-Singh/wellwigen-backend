@@ -23,6 +23,8 @@ import deliveryRoutes from "./src/features/delivery/delivery.routes.js";
 import categoryRoutes from "./src/features/category/category.routes.js";
 import orderRoutes from "./src/features/automation/order.routes.js";
 import userRoutes from "./src/features/user/user.routes.js";
+import subscriptionPlanRoutes from "./src/features/subscription/subscriptionPlan.routes.js";
+
 import User from "./src/features/user/user.model.js";
 import Subscription from "./src/features/subscription/subscription.model.js";
 import Order from "./src/features/automation/order.model.js";
@@ -124,6 +126,8 @@ app.use("/api/provider", providerRoutes);
 app.use("/api/category", categoryRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/subscription-plans", subscriptionPlanRoutes);
+
 
 // Global Error Handler
 app.use((err, req, res, next) => {

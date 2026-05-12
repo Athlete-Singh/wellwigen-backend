@@ -111,6 +111,33 @@ class OrderService {
         }
       }
 
+      // 👨‍⚕️ [DOCTOR CONSULTATION AUTO-SYNC]
+      const medicalPlan = ['Silver', 'Gold', 'Platinum', 'healthy_life', 'total_wellness', 'fit_start'];
+      if (medicalPlan.includes(activeSub.plan)) {
+        const existingConsult = await Order.findOne({
+          userId,
+          subscriptionId: activeSub._id,
+          type: "consultation",
+          status: { $ne: "delivered" }
+        });
+
+        if (!existingConsult) {
+          console.log(`👨‍⚕️ [ORDER_SERVICE] Creating LIVE consultation for User: ${userId}`);
+          await Order.create({
+            userId,
+            subscriptionId: activeSub._id,
+            scheduledFor: new Date(), // LIVE today
+            status: "pending",
+            type: "consultation",
+            items: [{ 
+              name: 'General Medical Consultation', 
+              quantity: 1 
+            }]
+          });
+          created++;
+        }
+      }
+
       console.log(`✅ [ORDER_SERVICE] Sync complete for User: ${userId}. Created ${created} orders.`);
       return { created, message: `Created ${created} upcoming orders` };
     } catch (err) {

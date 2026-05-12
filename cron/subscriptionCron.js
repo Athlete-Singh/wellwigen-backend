@@ -237,29 +237,67 @@ export const runSubscriptionExpiryCheck = async () => {
 };
 
 /**
- * Logic: Find all pending orders and remind active vendors via socket re-broadcast
+ * Logic: Find all pending lab tests and remind lab providers via socket
  */
-export const runVendorReminders = async () => {
-  console.log("🔔 [CRON] Checking for pending orders to remind vendors...");
+export const runLabReminders = async () => {
+  console.log("🔔 [CRON] Checking for pending lab tests to remind providers...");
   try {
-    const pendingOrders = await Order.find({ status: "pending" }).populate("userId");
+    const pendingTests = await Order.find({ 
+      type: "lab_test", 
+      status: { $in: ["pending", "assigned"] } 
+    }).populate("userId");
     
-    if (pendingOrders.length === 0) {
-      console.log("✅ No pending orders requiring reminders.");
+    if (pendingTests.length === 0) {
+      console.log("✅ No pending lab tests requiring reminders.");
       return;
     }
 
-    console.log(`📡 Re-broadcasting ${pendingOrders.length} pending orders to all active vendors...`);
+    console.log(`📡 Re-broadcasting ${pendingTests.length} pending lab tests to all labs...`);
+    
+    for (const test of pendingTests) {
+      if (ioInstance) {
+        ioInstance.emit("labReminder", {
+          id: test._id,
+          customer: test.userId?.name || "Patient",
+          testName: test.items?.[0]?.name || "Diagnostic Panel",
+          date: new Date(test.scheduledFor).toLocaleDateString(),
+          status: test.status === "pending" ? "Scheduled" : "In Progress",
+          message: `Reminder: Lab test for ${test.userId?.name || "Patient"} is scheduled.`
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error in runLabReminders:", error);
+  }
+};
+
+/**
+ * Logic: Find all pending produce orders and remind vendor providers via socket
+ */
+export const runVendorReminders = async () => {
+  console.log("🔔 [CRON] Checking for pending vendor orders to remind providers...");
+  try {
+    const pendingOrders = await Order.find({ 
+      type: "produce", 
+      status: "pending" 
+    }).populate("userId");
+    
+    if (pendingOrders.length === 0) {
+      console.log("✅ No pending vendor orders requiring reminders.");
+      return;
+    }
+
+    console.log(`📡 Re-broadcasting ${pendingOrders.length} pending vendor orders to all vendors...`);
     
     for (const order of pendingOrders) {
       if (ioInstance) {
-        ioInstance.emit("newOrder", {
+        ioInstance.emit("vendorReminder", {
           id: order._id,
           customer: order.userId?.name || "Subscriber",
-          product: order.items?.[0]?.name || "Fresh Produce Box",
+          product: order.items?.[0]?.name || "Wellness Box",
           date: new Date(order.scheduledFor).toLocaleDateString(),
           status: "Pending",
-          type: "Reminder"
+          message: `Reminder: Produce delivery for ${order.userId?.name || "Subscriber"} is pending.`
         });
       }
     }
@@ -288,6 +326,11 @@ export const subscriptionExpiryCheckTask = cron.schedule("*/3 * * * *", runSubsc
 });
 
 export const vendorReminderTask = cron.schedule("*/3 * * * *", runVendorReminders, {
+  scheduled: true,
+  timezone: "Asia/Kolkata",
+});
+
+export const labReminderTask = cron.schedule("*/3 * * * *", runLabReminders, {
   scheduled: true,
   timezone: "Asia/Kolkata",
 });

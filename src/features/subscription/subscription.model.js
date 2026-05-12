@@ -8,11 +8,15 @@ const subscriptionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SubscriptionPlan",
+    },
     plan: {
       type: String,
-      enum: ["fit_start", "healthy_life", "total_wellness"],
       required: true,
     },
+
     price: {
       type: Number,
       required: true,
