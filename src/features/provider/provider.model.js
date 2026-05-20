@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const providerSchema = new mongoose.Schema(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    userId: { type: String },
     type: {
       type: String,
       enum: ["NUTRITION", "VENDOR", "DOCTOR", "LAB", "TRAINER", "PHARMACY"],

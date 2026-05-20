@@ -8,7 +8,7 @@ import { ioInstance } from "../../../server.js";
 // Step 1: Initialize/Update Provider Progress
 export const saveProgress = async (req, res, next) => {
   try {
-    const { phone, providerId, ...progressData } = req.body;
+    const { phone, providerId, _id, ...progressData } = req.body;
 
     let provider = null;
 
@@ -52,17 +52,30 @@ export const saveProgress = async (req, res, next) => {
 // Original registration (can be used for final submission)
 export const registerProvider = async (req, res, next) => {
   try {
-    const { phone, ...finalData } = req.body;
+    const { phone, providerId, _id, ...finalData } = req.body;
 
-    let provider = await Provider.findOne({ phone });
-
-    if (!provider) {
-      provider = new Provider({ phone, ...finalData });
-    } else {
-      Object.assign(provider, finalData);
+    let provider = null;
+    if (providerId) {
+      provider = await Provider.findById(providerId);
+    }
+    if (!provider && phone && phone.trim() !== "") {
+      provider = await Provider.findOne({ phone });
     }
 
-    provider.verificationStatus = "under_review";
+    if (!provider) {
+      const newProviderData = {
+        phone,
+        ...finalData,
+        verificationStatus: "under_review",
+      };
+      if (phone && phone.trim() !== "") newProviderData.phone = phone;
+      provider = new Provider(newProviderData);
+    } else {
+      Object.assign(provider, finalData);
+      if (phone) provider.phone = phone;
+      provider.verificationStatus = "under_review";
+    }
+
     await provider.save();
 
     res.status(201).json({
