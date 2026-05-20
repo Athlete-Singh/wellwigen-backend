@@ -2,6 +2,8 @@ import Provider from "./provider.model.js";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { sendProviderApprovalEmail } from "../../core/utils/email.js";
+import { ioInstance } from "../../../server.js";
 
 // Step 1: Initialize/Update Provider Progress
 export const saveProgress = async (req, res, next) => {
@@ -198,12 +200,43 @@ export const verifyProvider = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Provider not found" });
     }
 
+    let cleartextPassword = "";
+    if (status === 'approved') {
+      // Generate a secure 8-character password with letters, numbers, and symbols
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$";
+      for (let i = 0; i < 8; i++) {
+        cleartextPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      
+      const salt = await bcrypt.genSalt(10);
+      provider.passwordHash = await bcrypt.hash(cleartextPassword, salt);
+      console.log(`🔑 [VERIFY] Generated temp password for ${provider.email || provider.businessName}: ${cleartextPassword}`);
+    }
+
     provider.verificationStatus = status;
     provider.isVerified = status === 'approved';
     provider.isActive = status === 'approved';
 
     await provider.save();
     console.log(`✅ PROVIDER_UPDATED: ${provider.businessName} is now ${status}`);
+
+    if (ioInstance) {
+      ioInstance.emit("providerStatusUpdated", { providerId, status });
+      console.log(`📡 Emitted providerStatusUpdated socket event for ${providerId}`);
+    }
+
+    // Send email asynchronously if approved
+    if (status === 'approved' && provider.email) {
+      console.log(`📧 [VERIFY] Triggering credentials email to: ${provider.email}`);
+      sendProviderApprovalEmail(
+        provider.email,
+        cleartextPassword,
+        provider.type || "VENDOR",
+        provider.businessName || provider.ownerName || "Wellwigen Partner"
+      ).catch((mailErr) => {
+        console.error("❌ [VERIFY] Failed to send approval email:", mailErr);
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -256,18 +289,39 @@ export const loginProvider = async (req, res, next) => {
 
     const status = isLegacyVendor ? (provider.status || "approved") : (provider.verificationStatus || "approved");
 
-    if (status === "pending") {
-      console.log("Login failed: pending status");
-      return res.status(403).json({ success: false, message: "Your account is pending admin approval." });
+    if (status !== "approved") {
+      console.log(`[LOGIN] Blocked login for ${email}: status is '${status}'`);
+      return res.status(403).json({ 
+        success: false, 
+        message: `Your account is currently in ${status.toUpperCase()} status. Only approved accounts can log in.` 
+      });
     }
 
-    if (status === "rejected") {
-      console.log("Login failed: rejected status");
-      return res.status(403).json({ success: false, message: "Your application was rejected." });
+    // VERIFY PASSWORD CRYPTOGRAPHICALLY
+    if (provider.passwordHash) {
+      const isMatch = await bcrypt.compare(password, provider.passwordHash);
+      if (!isMatch) {
+        console.log(`[LOGIN] Password mismatch for: ${email}`);
+        return res.status(401).json({ success: false, message: "Invalid credentials: The password you entered is incorrect." });
+      }
+    } else {
+      // Legacy mock account fallback support (allow password bypass only if no hash exists and password is 'password')
+      if (password !== "password") {
+        console.log(`[LOGIN] Password mismatch for unhashed mock account: ${email}`);
+        return res.status(401).json({ success: false, message: "Invalid credentials: The password you entered is incorrect." });
+      }
+      console.log(`[LOGIN] Mock account bypass for: ${email}`);
     }
 
-    // BYPASS PASSWORD CHECK FOR DEBUGGING
-    console.log(`Bypassing password check for ${email}. Login forced to successful.`);
+    // ENFORCE ROLE/PORTAL ALIGNMENT IF EXPECTED ROLE SPECIFIED
+    const providerRole = (provider.type || "VENDOR").toUpperCase();
+    if (req.body.expectedRole && req.body.expectedRole.toUpperCase() !== providerRole) {
+      console.log(`[LOGIN] Role mismatch: Portal expected ${req.body.expectedRole}, user is ${providerRole}`);
+      return res.status(403).json({
+        success: false,
+        message: `Access Denied: You are registered as a ${providerRole} and cannot sign in through the ${req.body.expectedRole} portal.`
+      });
+    }
     
     const token = jwt.sign(
       { id: provider._id, type: provider.type || "VENDOR" },

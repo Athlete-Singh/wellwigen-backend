@@ -7,6 +7,7 @@ import dns from "dns";
 import http from "http";
 import { Server } from "socket.io";
 import dotenv from "dotenv";
+import os from "os";
 import { startAutomationEngine } from "./src/core/jobs/orderEngine.js";
 
 // ✅ Initialize Subscription & Order Cron Jobs
@@ -51,13 +52,30 @@ const allowedOrigins = process.env.FRONTEND_URL
       "https://wellwigenportfolio-3e9d.vercel.app",
     ];
 
+// Get local network IP to dynamically allow it
+const getLocalIpAddress = () => {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return null;
+};
+const networkIp = getLocalIpAddress();
+
 // ✅ FIXED CORS (Main Issue Solved Here)
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin) return callback(null, true); // allow Postman / mobile apps
 
-      if (allowedOrigins.includes(origin)) {
+      const isNetworkIp = (networkIp && origin.startsWith(`http://${networkIp}:`)) || 
+                          origin.match(/^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+):\d+$/);
+
+      if (allowedOrigins.includes(origin) || isNetworkIp) {
         callback(null, true);
       } else {
         callback(new Error("❌ Not allowed by CORS: " + origin));
@@ -190,6 +208,11 @@ mongoose
 
 const PORT = process.env.PORT || 8000;
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`\n🚀 Backend Server is Live!`);
+  console.log(`  ➜  Local:   http://localhost:${PORT}`);
+  if (networkIp) {
+    console.log(`  ➜  Network: http://${networkIp}:${PORT}`);
+  }
+  console.log();
 });
