@@ -2,6 +2,8 @@ import Subscription from "./subscription.model.js";
 import SubscriptionPlan from "./subscriptionPlan.model.js";
 import razorpayInstance from "../../core/config/razorpay.js";
 import crypto from "crypto";
+import User from "../user/user.model.js";
+import { sendPushNotification } from "../../core/utils/firebase.js";
 
 export const createSubscription = async (req, res, next) => {
   try {
@@ -69,6 +71,24 @@ export const verifyPayment = async (req, res, next) => {
       .digest("hex");
 
     if (generated_signature !== razorpay_signature) {
+      // 🔔 Push Notification: Failed Payment (Admin Side)
+      try {
+        const admins = await User.find({ role: "admin" });
+        const adminTokens = admins.flatMap(a => a.fcmTokens || []);
+        const adminIds = admins.map(a => a._id.toString());
+        if (adminTokens.length > 0) {
+          await sendPushNotification(
+            adminTokens,
+            '⚠️ Payment Failed',
+            `A payment verification failed due to an invalid signature for Subscription: ${subscriptionId}`,
+            { type: 'payment_failed', subscriptionId },
+            { saveToDb: true, recipientIds: adminIds, role: 'admin' }
+          );
+        }
+      } catch (err) {
+        console.error('⚠️ [PUSH] Failed to send payment failure notification to admins:', err.message);
+      }
+
       return res.status(400).json({ success: false, message: "Invalid payment signature" });
     }
 
@@ -85,6 +105,23 @@ export const verifyPayment = async (req, res, next) => {
     subscription.nextRenewalDate = endDate;
 
     await subscription.save();
+
+    // 🔔 Push Notification: Payment Success
+    try {
+      const user = await User.findById(subscription.userId);
+      if (user && user.fcmTokens && user.fcmTokens.length > 0) {
+        await sendPushNotification(
+          user.fcmTokens,
+          '💳 Payment Successful!',
+          `Your subscription is now active until ${new Date(subscription.endDate).toLocaleDateString()}.`,
+          { type: 'payment_success', subscriptionId: subscription._id.toString() },
+          { saveToDb: true, recipientId: user._id.toString(), role: 'user' }
+        );
+        console.log(`🔔 [PUSH] Payment success notification sent to user ${subscription.userId}`);
+      }
+    } catch (notifErr) {
+      console.error('⚠️ [PUSH] Failed to send payment success notification:', notifErr.message);
+    }
 
     res.status(200).json({ success: true, message: "Payment verified and subscription activated!", data: subscription });
   } catch (err) {

@@ -34,6 +34,7 @@ const userSchema = new mongoose.Schema(
     profilePic: {
       type: String,
     },
+    fcmTokens: [{ type: String }],
   },
   { timestamps: true }
 );

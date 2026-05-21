@@ -89,6 +89,7 @@ const providerSchema = new mongoose.Schema(
       close: String, // e.g., "18:00"
       days: [String], // ["Monday", "Tuesday"]
     },
+    fcmTokens: [{ type: String }],
   },
   { timestamps: true }
 );

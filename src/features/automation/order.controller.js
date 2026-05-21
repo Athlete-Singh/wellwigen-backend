@@ -4,6 +4,7 @@ import Subscription from "../subscription/subscription.model.js";
 import { runDailyOrderCreation } from "../../../cron/subscriptionCron.js";
 import OrderService from "./order.service.js";
 import mongoose from "mongoose";
+import { sendPushNotification } from "../../core/utils/firebase.js";
 
 // Fetch all orders for a specific user
 export const getUserOrders = async (req, res) => {
@@ -91,6 +92,24 @@ export const updateOrderStatus = async (req, res) => {
       if (!order.providerId) {
         order.providerId = vendorId;
         console.log(`🔒 Order ${id} locked to Vendor ${vendorId}`);
+        
+        // 🔔 Push Notification: New Patient Assigned (Provider Side)
+        try {
+          const Provider = mongoose.model("Provider");
+          const provider = await Provider.findById(vendorId);
+          if (provider && provider.fcmTokens && provider.fcmTokens.length > 0) {
+            await sendPushNotification(
+              provider.fcmTokens,
+              '🧑‍⚕️ New Patient Assigned',
+              `A new patient has been assigned to your queue. Order ID: ${id}`,
+              { type: 'new_patient_assigned', orderId: id },
+              { saveToDb: true, recipientId: provider._id.toString(), role: 'provider' }
+            );
+            console.log(`🔔 [PUSH] New patient assigned notification sent to provider ${vendorId}`);
+          }
+        } catch (notifErr) {
+          console.error('⚠️ [PUSH] Failed to send new patient assigned notification to provider:', notifErr.message);
+        }
       }
     } else if (vendorId) {
       console.warn(`⚠️ [ORDER_STATUS] Received invalid vendorId: ${vendorId}. Proceeding without lock.`);
@@ -104,6 +123,43 @@ export const updateOrderStatus = async (req, res) => {
     // Use validateBeforeSave: false to ensure status updates work even with partially complete test data
     const updatedOrder = await order.save({ validateBeforeSave: false });
     console.log(`✅ Order ${id} updated to ${normalizedStatus}`);
+
+    // 🔔 Push Notification: Appointment Booked (order assigned to provider)
+    if (normalizedStatus === 'assigned' || normalizedStatus === 'confirmed') {
+      try {
+        const user = await User.findById(updatedOrder.userId);
+        if (user && user.fcmTokens && user.fcmTokens.length > 0) {
+          await sendPushNotification(
+            user.fcmTokens,
+            '📅 Appointment Confirmed!',
+            `Your ${updatedOrder.type || 'appointment'} has been booked and confirmed. A provider has been assigned to you.`,
+            { type: 'appointment_booked', orderId: updatedOrder._id.toString(), orderType: updatedOrder.type },
+            { saveToDb: true, recipientId: user._id.toString(), role: 'user' }
+          );
+          console.log(`🔔 [PUSH] Appointment booked notification sent to user ${updatedOrder.userId}`);
+        }
+      } catch (notifErr) {
+        console.error('⚠️ [PUSH] Failed to send appointment booked notification:', notifErr.message);
+      }
+    }
+
+    // 🔔 Push Notification: Order Delivered
+    if (normalizedStatus === 'delivered') {
+      try {
+        const user = await User.findById(updatedOrder.userId);
+        if (user && user.fcmTokens && user.fcmTokens.length > 0) {
+          await sendPushNotification(
+            user.fcmTokens,
+            '✅ Order Delivered!',
+            `Your ${updatedOrder.type || 'order'} has been delivered successfully. Thank you for using Wellwigen!`,
+            { type: 'order_delivered', orderId: updatedOrder._id.toString() },
+            { saveToDb: true, recipientId: user._id.toString(), role: 'user' }
+          );
+        }
+      } catch (notifErr) {
+        console.error('⚠️ [PUSH] Failed to send delivered notification:', notifErr.message);
+      }
+    }
 
     // Emit real-time notification
     const io = req.app.get("io");

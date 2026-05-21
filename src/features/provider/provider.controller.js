@@ -1,9 +1,11 @@
 import Provider from "./provider.model.js";
+import User from "../user/user.model.js";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { sendProviderApprovalEmail } from "../../core/utils/email.js";
 import { ioInstance } from "../../../server.js";
+import { sendPushNotification } from "../../core/utils/firebase.js";
 
 // Step 1: Initialize/Update Provider Progress
 export const saveProgress = async (req, res, next) => {
@@ -77,6 +79,24 @@ export const registerProvider = async (req, res, next) => {
     }
 
     await provider.save();
+
+    // 🔔 Push Notification: New Provider Registration (Admin Side)
+    try {
+      const admins = await User.find({ role: "admin" });
+      const adminTokens = admins.flatMap(a => a.fcmTokens || []);
+      const adminIds = admins.map(a => a._id.toString());
+      if (adminTokens.length > 0) {
+        await sendPushNotification(
+          adminTokens,
+          '📝 New Provider Registration',
+          `A new provider (${provider.businessName || provider.email}) has registered and is pending approval.`,
+          { type: 'new_provider_registration', providerId: provider._id.toString() },
+          { saveToDb: true, recipientIds: adminIds, role: 'admin' }
+        );
+      }
+    } catch (err) {
+      console.error('⚠️ [PUSH] Failed to send new provider notification to admins:', err.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -248,6 +268,27 @@ export const verifyProvider = async (req, res, next) => {
         provider.businessName || provider.ownerName || "Wellwigen Partner"
       ).catch((mailErr) => {
         console.error("❌ [VERIFY] Failed to send approval email:", mailErr);
+      });
+    }
+
+    // 🔔 Push Notification: Doctor/Provider Approved
+    if (provider.fcmTokens && provider.fcmTokens.length > 0) {
+      const notifTitle = status === 'approved'
+        ? '✅ Account Approved!'
+        : '❌ Application Update';
+      const notifBody = status === 'approved'
+        ? `Congratulations! Your Wellwigen ${provider.type || 'Provider'} account has been approved. You can now log in and start serving patients.`
+        : `Your application status has been updated to: ${status}. Please contact support for more information.`;
+      sendPushNotification(
+        provider.fcmTokens,
+        notifTitle,
+        notifBody,
+        { type: 'doctor_approved', status, providerId: providerId.toString() },
+        { saveToDb: true, recipientId: providerId.toString(), role: 'provider' }
+      ).then(() => {
+        console.log(`🔔 [PUSH] Doctor approved notification sent to provider ${providerId}`);
+      }).catch((pushErr) => {
+        console.error('⚠️ [PUSH] Failed to send doctor approved notification:', pushErr.message);
       });
     }
 

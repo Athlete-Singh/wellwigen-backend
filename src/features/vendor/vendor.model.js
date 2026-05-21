@@ -26,6 +26,7 @@ const vendorSchema = new mongoose.Schema(
       default: "VENDOR"
     },
     role: { type: String, default: "vendor" },
+    fcmTokens: [{ type: String }],
   },
   { timestamps: true }
 );

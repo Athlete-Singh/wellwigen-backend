@@ -1,5 +1,7 @@
 import Order from "./order.model.js";
 import Subscription from "../subscription/subscription.model.js";
+import Provider from "../provider/provider.model.js";
+import { sendPushNotification } from "../../core/utils/firebase.js";
 
 /**
  * Service to manage order automation and synchronization
@@ -94,7 +96,7 @@ class OrderService {
         });
 
         if (!existing) {
-          await Order.create({
+          const newOrder = await Order.create({
             userId,
             subscriptionId: activeSub._id,
             scheduledFor: targetDate,
@@ -108,6 +110,26 @@ class OrderService {
             }]
           });
           created++;
+
+          // 🔔 Push Notification: New Order Available (For Today's Orders)
+          if (i === 0 || forceToday) {
+            try {
+              const vendors = await Provider.find({ type: { $in: ["VENDOR", "PHARMACY", "NUTRITION", "LAB"] } });
+              const vendorTokens = vendors.flatMap(v => v.fcmTokens || []);
+              const vendorIds = vendors.map(v => v._id.toString());
+              if (vendorTokens.length > 0) {
+                await sendPushNotification(
+                  vendorTokens,
+                  '📦 New Order Available',
+                  `A new order is available in the queue. Check your dashboard!`,
+                  { type: 'new_order_available', orderId: newOrder._id.toString() },
+                  { saveToDb: true, recipientIds: vendorIds, role: 'provider' }
+                );
+              }
+            } catch (err) {
+              console.error('⚠️ [PUSH] Failed to send new order notification:', err.message);
+            }
+          }
         }
       }
 
@@ -123,7 +145,7 @@ class OrderService {
 
         if (!existingConsult) {
           console.log(`👨‍⚕️ [ORDER_SERVICE] Creating LIVE consultation for User: ${userId}`);
-          await Order.create({
+          const newConsult = await Order.create({
             userId,
             subscriptionId: activeSub._id,
             scheduledFor: new Date(), // LIVE today
@@ -135,6 +157,24 @@ class OrderService {
             }]
           });
           created++;
+
+          // 🔔 Push Notification: New Consultation Request
+          try {
+            const doctors = await Provider.find({ type: "DOCTOR" });
+            const docTokens = doctors.flatMap(d => d.fcmTokens || []);
+            const docIds = doctors.map(d => d._id.toString());
+            if (docTokens.length > 0) {
+              await sendPushNotification(
+                docTokens,
+                '🩺 New Consultation Request',
+                `A new patient consultation request is waiting in the queue.`,
+                { type: 'new_consultation_request', orderId: newConsult._id.toString() },
+                { saveToDb: true, recipientIds: docIds, role: 'provider' }
+              );
+            }
+          } catch (err) {
+            console.error('⚠️ [PUSH] Failed to send new consultation notification:', err.message);
+          }
         }
       }
 
