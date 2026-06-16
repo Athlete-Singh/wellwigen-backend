@@ -116,3 +116,80 @@ export const sendProviderApprovalEmail = async (toEmail, password, providerType,
     console.error("❌ [EMAIL] Error occurred while sending email:", err);
   }
 };
+
+/**
+ * Sends a contact form query to the wellwigen gmail.
+ * 
+ * @param {string} name - The sender's name
+ * @param {string} email - The sender's email address
+ * @param {string} subject - The subject of the query
+ * @param {string} message - The query message
+ */
+export const sendContactEmail = async (name, email, subject, message) => {
+  try {
+    let transporter;
+    const isSmtpConfigured =
+      process.env.SMTP_HOST &&
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASS;
+
+    if (isSmtpConfigured) {
+      console.log("📨 [EMAIL] Using configured SMTP settings to send contact email.");
+      transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || "587"),
+        secure: process.env.SMTP_PORT === "465",
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+    } else {
+      console.log("🧪 [EMAIL] No SMTP settings found in env. Setting up Ethereal Mail test account...");
+      const testAccount = await nodemailer.createTestAccount();
+      transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass,
+        },
+      });
+    }
+
+    const mailOptions = {
+      from: `"Wellwigen Contact Form" <no-reply@wellwigen.com>`,
+      to: "wellwigen@gmail.com",
+      replyTo: email,
+      subject: `New Contact Form Query: ${subject}`,
+      text: `You have received a new query from the contact form.\n\nName: ${name}\nEmail: ${email}\nSubject: ${subject}\n\nMessage:\n${message}`,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #f1f5f9; border-radius: 16px; background-color: #ffffff; color: #1e293b;">
+          <h2 style="color: #0f172a; border-bottom: 2px solid #009688; padding-bottom: 10px;">New Contact Query</h2>
+          <p><strong>Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Subject:</strong> ${subject}</p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-top: 20px;">
+            <p style="margin: 0; white-space: pre-wrap;">${message}</p>
+          </div>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ [EMAIL] Contact email sent successfully. Message ID: ${info.messageId}`);
+    
+    if (!isSmtpConfigured) {
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      console.log("\n=======================================================");
+      console.log("💌 [EMAIL PREVIEW] Open the URL below to view the contact email:");
+      console.log(`🔗 ${previewUrl}`);
+      console.log("=======================================================\n");
+    }
+    return info;
+  } catch (err) {
+    console.error("❌ [EMAIL] Error occurred while sending contact email:", err);
+    throw err;
+  }
+};

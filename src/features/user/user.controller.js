@@ -1,6 +1,7 @@
 import User from "./user.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { sendContactEmail } from "../../core/utils/email.js";
 
 export const registerUser = async (req, res) => {
   try {
@@ -84,5 +85,25 @@ export const getProfile = async (req, res) => {
     res.json({ success: true, user });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+export const submitContactForm = async (req, res) => {
+  try {
+    const { name, email, subject, message } = req.body;
+
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
+    }
+
+    // Send email asynchronously so it doesn't block the response if SMTP is slow
+    sendContactEmail(name, email, subject, message).catch(err => {
+      console.error("❌ Background email sending failed:", err);
+    });
+
+    res.status(200).json({ success: true, message: "Contact email queued successfully" });
+  } catch (error) {
+    console.error("❌ Error in submitContactForm:", error);
+    res.status(500).json({ success: false, message: "Failed to process request", error: error.message });
   }
 };
