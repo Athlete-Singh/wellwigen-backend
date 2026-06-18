@@ -51,6 +51,8 @@ const allowedOrigins = process.env.FRONTEND_URL
       "http://localhost:3000",
       "http://localhost:3001",
       "https://wellwigenportfolio-3e9d.vercel.app",
+      "https://wellwigen.com",
+      "https://www.wellwigen.com",
     ];
 
 // Get local network IP to dynamically allow it
@@ -210,7 +212,7 @@ mongoose
 
 const PORT = process.env.PORT || 8000;
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, () => {
   console.log(`\n🚀 Backend Server is Live!`);
   console.log(`  ➜  Local:   http://localhost:${PORT}`);
   if (networkIp) {
