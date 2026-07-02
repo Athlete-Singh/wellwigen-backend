@@ -122,10 +122,14 @@ export const sendProviderApprovalEmail = async (toEmail, password, providerType,
  * 
  * @param {string} name - The sender's name
  * @param {string} email - The sender's email address
+ * @param {string} phone - The sender's phone
+ * @param {string} company - The sender's company
  * @param {string} subject - The subject of the query
  * @param {string} message - The query message
+ * @param {string} date - Date and time of the submission
+ * @param {string} ip - Sender IP address
  */
-export const sendContactEmail = async (name, email, subject, message) => {
+export const sendContactEmail = async (name, email, phone, company, subject, message, date, ip) => {
   try {
     let transporter;
     const isSmtpConfigured =
@@ -163,15 +167,21 @@ export const sendContactEmail = async (name, email, subject, message) => {
       to: "wellwigen@gmail.com",
       replyTo: email,
       subject: `New Contact Form Query: ${subject}`,
-      text: `You have received a new query from the contact form.\n\nName: ${name}\nEmail: ${email}\nSubject: ${subject}\n\nMessage:\n${message}`,
+      text: `You have received a new query from the contact form.\n\nName: ${name}\nEmail: ${email}\nPhone: ${phone || 'N/A'}\nCompany: ${company || 'N/A'}\nDate: ${date}\nIP: ${ip}\nSubject: ${subject}\n\nMessage:\n${message}`,
       html: `
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #f1f5f9; border-radius: 16px; background-color: #ffffff; color: #1e293b;">
           <h2 style="color: #0f172a; border-bottom: 2px solid #009688; padding-bottom: 10px;">New Contact Query</h2>
           <p><strong>Name:</strong> ${name}</p>
           <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Phone:</strong> ${phone || 'N/A'}</p>
+          <p><strong>Company:</strong> ${company || 'N/A'}</p>
           <p><strong>Subject:</strong> ${subject}</p>
           <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-top: 20px;">
             <p style="margin: 0; white-space: pre-wrap;">${message}</p>
+          </div>
+          <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8;">
+            <p style="margin: 0;"><strong>Date:</strong> ${date}</p>
+            <p style="margin: 0;"><strong>Sender IP:</strong> ${ip}</p>
           </div>
         </div>
       `,

@@ -2,6 +2,7 @@ import User from "./user.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { sendContactEmail } from "../../core/utils/email.js";
+import admin from "../../core/utils/firebase.js";
 
 export const registerUser = async (req, res) => {
   try {
@@ -90,14 +91,33 @@ export const getProfile = async (req, res) => {
 
 export const submitContactForm = async (req, res) => {
   try {
-    const { name, email, subject, message } = req.body;
+    const { name, email, phone, company, subject, message } = req.body;
 
     if (!name || !email || !subject || !message) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
 
-    // Send email asynchronously so it doesn't block the response if SMTP is slow
-    sendContactEmail(name, email, subject, message).catch(err => {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'Unknown';
+    const date = new Date().toISOString();
+
+    // 1. Save to Firebase (Run asynchronously to prevent blocking)
+    if (admin && admin.apps && admin.apps.length > 0) {
+      const { FieldValue } = admin.firestore;
+      admin.firestore().collection('messages').add({
+        name,
+        email,
+        phone: phone || '',
+        company: company || '',
+        subject,
+        message,
+        ip,
+        createdAt: FieldValue.serverTimestamp(),
+        read: false,
+      }).catch(err => console.error("❌ Firebase save failed:", err));
+    }
+
+    // 2. Send email asynchronously so it doesn't block the response
+    sendContactEmail(name, email, phone, company, subject, message, date, ip).catch(err => {
       console.error("❌ Background email sending failed:", err);
     });
 
