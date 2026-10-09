@@ -1,4 +1,5 @@
 import User from "./user.model.js";
+import Lead from "./lead.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { sendContactEmail } from "../../core/utils/email.js";
@@ -91,16 +92,37 @@ export const getProfile = async (req, res) => {
 
 export const submitContactForm = async (req, res) => {
   try {
-    const { name, email, phone, company, subject, message } = req.body;
+    const { name, email, phone, company, subject, message, program, plan, fitnessGoal, preferredTime } = req.body;
 
-    if (!name || !email || !subject || !message) {
-      return res.status(400).json({ success: false, message: "All fields are required" });
+    if (!name || !email) {
+      return res.status(400).json({ success: false, message: "Name and email are required" });
     }
 
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'Unknown';
     const date = new Date().toISOString();
 
-    // 1. Save to Firebase (Run asynchronously to prevent blocking)
+    // 1. Save directly into MongoDB Database
+    let savedLead = null;
+    try {
+      savedLead = await Lead.create({
+        name,
+        email,
+        phone: phone || '',
+        program: program || (company && company.includes('Group Classes') ? 'Group Classes' : company && company.includes('Personal Training') ? 'Personal Training' : 'General Inquiry'),
+        plan: plan || '',
+        fitnessGoal: fitnessGoal || '',
+        preferredTime: preferredTime || '',
+        company: company || '',
+        subject: subject || `Inquiry from ${name}`,
+        message: message || '',
+        ip,
+      });
+      console.log("✅ [MONGODB] Lead successfully saved to MongoDB:", savedLead._id);
+    } catch (dbErr) {
+      console.error("❌ [MONGODB] Error saving lead to MongoDB:", dbErr.message);
+    }
+
+    // 2. Save to Firebase (Optional async sync)
     if (admin && admin.apps && admin.apps.length > 0) {
       const { FieldValue } = admin.firestore;
       admin.firestore().collection('messages').add({
@@ -108,22 +130,36 @@ export const submitContactForm = async (req, res) => {
         email,
         phone: phone || '',
         company: company || '',
-        subject,
-        message,
+        subject: subject || '',
+        message: message || '',
         ip,
         createdAt: FieldValue.serverTimestamp(),
         read: false,
       }).catch(err => console.error("❌ Firebase save failed:", err));
     }
 
-    // 2. Send email asynchronously so it doesn't block the response
-    sendContactEmail(name, email, phone, company, subject, message, date, ip).catch(err => {
+    // 3. Send email asynchronously so it doesn't block the response
+    sendContactEmail(name, email, phone, company, subject || '', message || '', date, ip).catch(err => {
       console.error("❌ Background email sending failed:", err);
     });
 
-    res.status(200).json({ success: true, message: "Contact email queued successfully" });
+    res.status(200).json({
+      success: true,
+      message: "Lead saved to database successfully",
+      leadId: savedLead ? savedLead._id : undefined,
+    });
   } catch (error) {
     console.error("❌ Error in submitContactForm:", error);
     res.status(500).json({ success: false, message: "Failed to process request", error: error.message });
   }
 };
+
+export const getLeads = async (req, res) => {
+  try {
+    const leads = await Lead.find().sort({ createdAt: -1 });
+    res.json({ success: true, count: leads.length, leads });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch leads", error: error.message });
+  }
+};
+

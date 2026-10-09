@@ -26,6 +26,10 @@ import orderRoutes from "./src/features/automation/order.routes.js";
 import userRoutes from "./src/features/user/user.routes.js";
 import subscriptionPlanRoutes from "./src/features/subscription/subscriptionPlan.routes.js";
 import notificationRoutes from "./src/features/notification/notification.routes.js";
+// OLD CODE (commented by AI)
+// (no previous inquiryRoutes import)
+// NEW CODE - Wellwigen restyle / Inquiries feature
+import inquiryRoutes from "./src/features/inquiry/inquiry.routes.js";
 
 import User from "./src/features/user/user.model.js";
 import Subscription from "./src/features/subscription/subscription.model.js";
@@ -147,8 +151,13 @@ app.use("/api/provider", providerRoutes);
 app.use("/api/category", categoryRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/subscription-plans", subscriptionPlanRoutes);
 app.use("/api/notifications", notificationRoutes);
+// OLD CODE (commented by AI)
+// (no inquiries route mounted previously)
+// NEW CODE - Wellwigen restyle / Inquiries feature
+app.use("/api/inquiries", inquiryRoutes);
 
 
 // Global Error Handler
@@ -171,44 +180,61 @@ app.get("/", (req, res) => {
   res.send("WellWigen Backend Running 🚀");
 });
 
-// MongoDB Connection
-mongoose
-  .connect(process.env.MONGO_URL, { dbName: "wellwigen" })
-  .then(() => {
-    console.log("✅ MongoDB Connected");
-    
-    // Immediate Health Check & Sync on Startup
-    const performStartupSync = async () => {
-      try {
-        const User = mongoose.model("User");
-        const Subscription = mongoose.model("Subscription");
-        const Order = mongoose.model("Order");
-        const Provider = mongoose.model("Provider");
+// MongoDB Connection with Auto-Fallback
+const primaryMongoUri = process.env.MONGO_URL || "mongodb://127.0.0.1:27017/wellwigen";
+const localMongoUri = "mongodb://127.0.0.1:27017/wellwigen";
 
-        const counts = {
-          users: await User.countDocuments(),
-          vendors: await Provider.countDocuments(),
-          subscriptions: await Subscription.countDocuments({ status: "active" }),
-          orders: await Order.countDocuments()
-        };
+const connectMongo = async () => {
+  try {
+    await mongoose.connect(primaryMongoUri, { dbName: "wellwigen" });
+    console.log(`✅ MongoDB Connected to: ${primaryMongoUri.includes("@") ? "MongoDB Atlas Cloud" : "Local MongoDB (127.0.0.1:27017)"}`);
+  } catch (err) {
+    console.warn(`⚠️ Primary MongoDB connection failed (${err.message}). Attempting fallback to local MongoDB...`);
+    try {
+      await mongoose.connect(localMongoUri, { dbName: "wellwigen" });
+      console.log(`✅ Connected to Fallback Local MongoDB (127.0.0.1:27017)`);
+    } catch (fallbackErr) {
+      console.error(`❌ Both MongoDB connection attempts failed:`, fallbackErr.message);
+      return;
+    }
+  }
 
-        console.log("📊 [STARTUP] System Health Check:", counts);
-        
-        const { runDailyOrderCreation } = await import("./cron/subscriptionCron.js");
-        console.log("⚙️ [STARTUP] Triggering immediate Order Creation Sync...");
-        await runDailyOrderCreation();
-        console.log("✅ [STARTUP] Sync complete.");
-      } catch (err) {
-        console.error("❌ [STARTUP] Error during health check/sync:", err.message);
-      }
-    };
-    performStartupSync();
-    
-    // ✅ Start the Automation Engine (BullMQ Workers & Engine Cron)
-    console.log("⚙️ Starting Automation Engine...");
+  // Immediate Health Check & Sync on Startup
+  const performStartupSync = async () => {
+    try {
+      const User = mongoose.model("User");
+      const Subscription = mongoose.model("Subscription");
+      const Order = mongoose.model("Order");
+      const Provider = mongoose.model("Provider");
+
+      const counts = {
+        users: await User.countDocuments(),
+        vendors: await Provider.countDocuments(),
+        subscriptions: await Subscription.countDocuments({ status: "active" }),
+        orders: await Order.countDocuments()
+      };
+
+      console.log("📊 [STARTUP] System Health Check:", counts);
+      
+      const { runDailyOrderCreation } = await import("./cron/subscriptionCron.js");
+      console.log("⚙️ [STARTUP] Triggering immediate Order Creation Sync...");
+      await runDailyOrderCreation();
+      console.log("✅ [STARTUP] Sync complete.");
+    } catch (err) {
+      console.error("❌ [STARTUP] Error during health check/sync:", err.message);
+    }
+  };
+  performStartupSync();
+  
+  console.log("⚙️ Starting Automation Engine...");
+  try {
     startAutomationEngine();
-  })
-  .catch((err) => console.log("❌ MongoDB Error:", err));
+  } catch (engErr) {
+    console.warn("⚠️ Engine started in passive mode:", engErr.message);
+  }
+};
+
+connectMongo();
 
 const PORT = process.env.PORT || 8000;
 

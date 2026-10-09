@@ -99,6 +99,7 @@ export const startAutomationEngine = () => {
       },
       { connection: redisConnection }
     );
+    orderWorker.on("error", () => {});
   }
 
   if (!timeoutWorker) {
@@ -126,6 +127,7 @@ export const startAutomationEngine = () => {
       },
       { connection: redisConnection }
     );
+    timeoutWorker.on("error", () => {});
   }
 
   cron.schedule("0 23 * * *", async () => {

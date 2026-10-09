@@ -23,5 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment
+.env
+.env.*
+!.env.example
+
 # Firebase
 firebase-service-account.json
