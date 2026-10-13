@@ -75,6 +75,9 @@ const inquirySchema = new mongoose.Schema(
 // Helpful index for sorting & filtering by date and status
 inquirySchema.index({ createdAt: -1 });
 
+/* [DISABLED FOR FUTURE USE] Single model compilation:
 const Inquiry = mongoose.model("Inquiry", inquirySchema);
+*/
+const Inquiry = mongoose.models?.Inquiry || mongoose.model("Inquiry", inquirySchema);
 
 export default Inquiry;

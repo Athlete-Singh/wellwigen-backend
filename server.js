@@ -27,9 +27,12 @@ import userRoutes from "./src/features/user/user.routes.js";
 import subscriptionPlanRoutes from "./src/features/subscription/subscriptionPlan.routes.js";
 import notificationRoutes from "./src/features/notification/notification.routes.js";
 // OLD CODE (commented by AI)
+// OLD CODE (commented by AI)
 // (no previous inquiryRoutes import)
 // NEW CODE - Wellwigen restyle / Inquiries feature
 import inquiryRoutes from "./src/features/inquiry/inquiry.routes.js";
+// NEW CODE - Wellwigen Trainer Portal & Admin feature
+import { adminTrainerRouter, trainerRouter } from "./src/features/trainer/trainer.routes.js";
 
 import User from "./src/features/user/user.model.js";
 import Subscription from "./src/features/subscription/subscription.model.js";
@@ -158,6 +161,9 @@ app.use("/api/notifications", notificationRoutes);
 // (no inquiries route mounted previously)
 // NEW CODE - Wellwigen restyle / Inquiries feature
 app.use("/api/inquiries", inquiryRoutes);
+// NEW CODE - Wellwigen Trainer Portal & Admin feature
+app.use("/api/admin/trainers", adminTrainerRouter);
+app.use("/api/trainers", trainerRouter);
 
 
 // Global Error Handler
