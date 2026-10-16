@@ -54,11 +54,30 @@ const subscriptionSchema = new mongoose.Schema(
         relation: String,
       },
     ],
+    // Subscription Expiry & Renewal Reminder tracking (3-day automated reminder)
+    renewalReminder: {
+      targetEndDate: { type: Date },
+      emailStatus: {
+        type: String,
+        enum: ["pending", "sent", "failed", "skipped"],
+        default: "pending",
+      },
+      emailSentAt: { type: Date, default: null },
+      pushStatus: {
+        type: String,
+        enum: ["pending", "sent", "failed", "skipped"],
+        default: "pending",
+      },
+      pushSentAt: { type: Date, default: null },
+      lastAttemptAt: { type: Date, default: null },
+      lastError: { type: String, default: null },
+    },
   },
   { timestamps: true }
 );
 
 // Indexes for fast querying
 subscriptionSchema.index({ userId: 1, status: 1 });
+subscriptionSchema.index({ status: 1, endDate: 1 });
 
-export default mongoose.model("Subscription", subscriptionSchema);
+export default mongoose.models.Subscription || mongoose.model("Subscription", subscriptionSchema);

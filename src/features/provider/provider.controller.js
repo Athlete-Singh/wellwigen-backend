@@ -12,20 +12,38 @@ export const saveProgress = async (req, res, next) => {
   try {
     const { phone, providerId, _id, ...progressData } = req.body;
 
+    // Security: Strip any client-tampered flags
+    delete progressData.emailVerified;
+    delete progressData.emailVerifiedAt;
+    delete progressData.isVerified;
+
     let provider = null;
 
-    // 1. Try finding by ID
-    if (providerId) {
+    // 1. Try finding by authenticated provider session or ID
+    if (req.provider) {
+      provider = req.provider;
+    } else if (providerId) {
       provider = await Provider.findById(providerId);
     }
     if (!provider && phone && phone.trim() !== "") {
-      provider = await Provider.findOne({ phone });
+      provider = await Provider.findOne({ phone: phone.trim() });
+    }
+
+    // Email change detection: If email changes after verification, reset emailVerified
+    if (progressData.email && typeof progressData.email === "string") {
+      const normalizedEmail = progressData.email.trim().toLowerCase();
+      progressData.email = normalizedEmail;
+
+      if (provider && provider.email && provider.email.toLowerCase() !== normalizedEmail && provider.emailVerified) {
+        provider.emailVerified = false;
+        provider.emailVerifiedAt = null;
+      }
     }
 
     if (provider) {
-      // Update existing
+      // Update existing draft
       Object.assign(provider, progressData);
-      if (phone) provider.phone = phone;
+      if (phone) provider.phone = phone.trim();
       await provider.save();
     } else {
       // Create new draft
@@ -33,69 +51,107 @@ export const saveProgress = async (req, res, next) => {
         ...progressData,
         verificationStatus: "pending",
         isVerified: false,
+        emailVerified: false,
       };
-      if (phone && phone.trim() !== "") newProviderData.phone = phone;
+      if (phone && phone.trim() !== "") newProviderData.phone = phone.trim();
 
       provider = new Provider(newProviderData);
       await provider.save();
     }
 
+    // Issue/renew onboarding session JWT token
+    const token = jwt.sign(
+      { id: provider._id, type: provider.type || "VENDOR", role: "provider_onboarding" },
+      process.env.JWT_SECRET || "fallback_secret",
+      { expiresIn: "7d" }
+    );
+
     res.status(200).json({
       success: true,
       message: "Progress saved",
       data: provider,
+      token,
     });
   } catch (err) {
-    console.error("Save Progress Error:", err);
+    console.error("Save Progress Error:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// Original registration (can be used for final submission)
+// Final application submission / registration
 export const registerProvider = async (req, res, next) => {
   try {
     const { phone, providerId, _id, ...finalData } = req.body;
 
+    // Security: Ignore client-provided verification & progress overrides
+    delete finalData.emailVerified;
+    delete finalData.emailVerifiedAt;
+    delete finalData.isVerified;
+    delete finalData.onboardingStep;
+
     let provider = null;
-    if (providerId) {
+    if (req.provider) {
+      provider = req.provider;
+    } else if (providerId) {
       provider = await Provider.findById(providerId);
     }
     if (!provider && phone && phone.trim() !== "") {
-      provider = await Provider.findOne({ phone });
+      provider = await Provider.findOne({ phone: phone.trim() });
     }
 
     if (!provider) {
-      const newProviderData = {
-        phone,
-        ...finalData,
-        verificationStatus: "under_review",
-      };
-      if (phone && phone.trim() !== "") newProviderData.phone = phone;
-      provider = new Provider(newProviderData);
-    } else {
-      Object.assign(provider, finalData);
-      if (phone) provider.phone = phone;
-      provider.verificationStatus = "under_review";
+      return res.status(404).json({
+        success: false,
+        message: "Provider application draft not found. Please complete the initial onboarding steps.",
+      });
     }
+
+    // Server-side verification enforcement: Check database flag directly
+    if (!provider.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Forbidden: Email verification is required before submitting your application. Please verify your email.",
+      });
+    }
+
+    // Detect if client attempted to submit a different email than the verified one
+    if (finalData.email && typeof finalData.email === "string") {
+      const submittedEmail = finalData.email.trim().toLowerCase();
+      if (provider.email && provider.email.toLowerCase() !== submittedEmail) {
+        provider.emailVerified = false;
+        provider.emailVerifiedAt = null;
+        await provider.save();
+        return res.status(403).json({
+          success: false,
+          message: "Email mismatch detected. Your verification has been reset. Please verify your new email address.",
+        });
+      }
+    }
+
+    // Apply submitted data
+    Object.assign(provider, finalData);
+    if (phone) provider.phone = phone.trim();
+    provider.onboardingStep = 7;
+    provider.verificationStatus = "under_review";
 
     await provider.save();
 
     // 🔔 Push Notification: New Provider Registration (Admin Side)
     try {
       const admins = await User.find({ role: "admin" });
-      const adminTokens = admins.flatMap(a => a.fcmTokens || []);
-      const adminIds = admins.map(a => a._id.toString());
+      const adminTokens = admins.flatMap((a) => a.fcmTokens || []);
+      const adminIds = admins.map((a) => a._id.toString());
       if (adminTokens.length > 0) {
         await sendPushNotification(
           adminTokens,
-          '📝 New Provider Registration',
+          "📝 New Provider Registration",
           `A new provider (${provider.businessName || provider.email}) has registered and is pending approval.`,
-          { type: 'new_provider_registration', providerId: provider._id.toString() },
-          { saveToDb: true, recipientIds: adminIds, role: 'admin' }
+          { type: "new_provider_registration", providerId: provider._id.toString() },
+          { saveToDb: true, recipientIds: adminIds, role: "admin" }
         );
       }
     } catch (err) {
-      console.error('⚠️ [PUSH] Failed to send new provider notification to admins:', err.message);
+      console.error("⚠️ [PUSH] Failed to send new provider notification to admins:", err.message);
     }
 
     res.status(201).json({
@@ -108,17 +164,44 @@ export const registerProvider = async (req, res, next) => {
   }
 };
 
-// Upload documents (Mocked S3 upload logic)
+// Upload documents with server-side validation
 export const uploadDocuments = async (req, res, next) => {
   try {
-    const { providerId, documents } = req.body; // In real app, use req.files + S3
+    const providerId = req.provider?._id || req.body.providerId;
 
     const provider = await Provider.findById(providerId);
     if (!provider) return res.status(404).json({ success: false, message: "Provider not found" });
 
-    provider.documents = [...provider.documents, ...documents];
-    provider.verificationStatus = "under_review";
+    // Handle files uploaded via multer
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      const { verifyFileMagicBytes } = await import("../../core/middleware/uploadMiddleware.js");
+      const newDocs = [];
 
+      for (const file of req.files) {
+        // Validate magic bytes on server disk
+        const isValidMagic = verifyFileMagicBytes(file.path);
+        if (!isValidMagic) {
+          // Remove invalid file
+          import("fs").then((fs) => fs.unlink(file.path, () => {})).catch(() => {});
+          return res.status(400).json({
+            success: false,
+            message: `Security validation failed: File "${file.originalname}" does not match its claimed file type signature.`,
+          });
+        }
+
+        newDocs.push({
+          docType: req.body.docType || "Registration Document",
+          fileUrl: `/uploads/${file.filename}`,
+          verified: false,
+        });
+      }
+
+      provider.documents = [...provider.documents, ...newDocs];
+    } else if (req.body.documents && Array.isArray(req.body.documents)) {
+      provider.documents = [...provider.documents, ...req.body.documents];
+    }
+
+    provider.verificationStatus = "under_review";
     await provider.save();
 
     res.status(200).json({
@@ -309,42 +392,33 @@ export const loginProvider = async (req, res, next) => {
     let { email, password } = req.body;
 
     if (!email || !password) {
-      console.log("Login failed: missing email or password", req.body);
-      return res.status(400).json({ success: false, message: "Email and password are required. Received: " + JSON.stringify(req.body) });
+      return res.status(400).json({ success: false, message: "Email and password are required." });
     }
 
     email = email.trim().toLowerCase();
-    console.log(`[LOGIN_DEBUG] Searching for: ${email}`);
     
     let provider = await Provider.findOne({ email });
     let isLegacyVendor = false;
 
-    if (provider) {
-      console.log(`[LOGIN_DEBUG] Found in Provider collection:`, provider._id);
-    } else {
-      console.log(`[LOGIN_DEBUG] Not found in Provider, checking Vendor collection...`);
+    if (!provider) {
       try {
         const VendorModel = mongoose.models.Vendor || (await import("../vendor/vendor.model.js")).default;
         provider = await VendorModel.findOne({ email });
         if (provider) {
-          console.log(`[LOGIN_DEBUG] Found in Legacy Vendor collection:`, provider._id);
           isLegacyVendor = true;
-        } else {
-          console.log(`[LOGIN_DEBUG] Not found in Vendor collection either.`);
         }
       } catch (err) {
-        console.error(`[LOGIN_DEBUG] Error importing Vendor model:`, err);
+        console.error(`Error importing Vendor model:`, err.message);
       }
     }
 
     if (!provider) {
-      return res.status(401).json({ success: false, message: `Invalid credentials: No account found for email '${email}'` });
+      return res.status(401).json({ success: false, message: "Invalid credentials: No account found." });
     }
 
     const status = isLegacyVendor ? (provider.status || "approved") : (provider.verificationStatus || "approved");
 
     if (status !== "approved") {
-      console.log(`[LOGIN] Blocked login for ${email}: status is '${status}'`);
       return res.status(403).json({ 
         success: false, 
         message: `Your account is currently in ${status.toUpperCase()} status. Only approved accounts can log in.` 
@@ -355,16 +429,10 @@ export const loginProvider = async (req, res, next) => {
     if (provider.passwordHash) {
       const isMatch = await bcrypt.compare(password, provider.passwordHash);
       if (!isMatch) {
-        console.log(`[LOGIN] Password mismatch for: ${email}`);
         return res.status(401).json({ success: false, message: "Invalid credentials: The password you entered is incorrect." });
       }
     } else {
-      // Legacy mock account fallback support (allow password bypass only if no hash exists and password is 'password')
-      if (password !== "password") {
-        console.log(`[LOGIN] Password mismatch for unhashed mock account: ${email}`);
-        return res.status(401).json({ success: false, message: "Invalid credentials: The password you entered is incorrect." });
-      }
-      console.log(`[LOGIN] Mock account bypass for: ${email}`);
+      return res.status(401).json({ success: false, message: "Password not set. Please contact support to set up your password." });
     }
 
     // ENFORCE ROLE/PORTAL ALIGNMENT IF EXPECTED ROLE SPECIFIED

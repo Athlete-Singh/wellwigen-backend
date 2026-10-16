@@ -13,12 +13,14 @@ import {
   deleteProvider
 } from "./provider.controller.js";
 
+import { documentUpload } from "../../core/middleware/uploadMiddleware.js";
+
 const router = express.Router();
 
 router.post("/login", loginProvider);
 router.post("/register", registerProvider);
 router.post("/save-progress", saveProgress);
-router.post("/upload-documents", uploadDocuments);
+router.post("/upload-documents", documentUpload.array("files", 10), uploadDocuments);
 router.get("/me/:providerId", getMyProfile);
 router.put("/availability/:providerId", updateAvailability);
 

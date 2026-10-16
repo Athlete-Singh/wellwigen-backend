@@ -203,3 +203,174 @@ export const sendContactEmail = async (name, email, phone, company, subject, mes
     throw err;
   }
 };
+
+/**
+ * Escapes special HTML characters to prevent XSS / formatting corruption
+ */
+const escapeHtml = (str) => {
+  if (!str || typeof str !== "string") return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+};
+
+/**
+ * Sends a 3-day subscription expiry reminder email to the client.
+ * Uses configured SMTP with fallback to Ethereal Mail for dev/testing.
+ * 
+ * @param {Object} params
+ * @param {string} params.toEmail - Client email address
+ * @param {string} [params.clientName] - Client name
+ * @param {Date|string} params.expiryDate - The subscription endDate
+ * @param {string} [params.planName] - Name of the plan (e.g. Total Wellness)
+ * @returns {Promise<{ success: boolean, messageId?: string, error?: string }>}
+ */
+export const sendSubscriptionExpiryEmail = async ({ toEmail, clientName, expiryDate, planName }) => {
+  try {
+    if (!toEmail || typeof toEmail !== "string" || !toEmail.includes("@")) {
+      return { success: false, error: "Invalid recipient email" };
+    }
+
+    let transporter;
+    const isSmtpConfigured =
+      process.env.SMTP_HOST &&
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASS;
+
+    if (isSmtpConfigured) {
+      transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || "587"),
+        secure: process.env.SMTP_PORT === "465",
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+    } else {
+      const testAccount = await nodemailer.createTestAccount();
+      transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass,
+        },
+      });
+    }
+
+    const safeName = (clientName && typeof clientName === "string" && clientName.trim())
+      ? clientName.trim()
+      : "Valued Client";
+    const escapedName = escapeHtml(safeName);
+
+    // Format expiry date in Asia/Kolkata timezone
+    const dateObj = new Date(expiryDate);
+    const formattedDate = !isNaN(dateObj.getTime())
+      ? dateObj.toLocaleDateString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })
+      : String(expiryDate);
+
+    const safePlan = (planName && typeof planName === "string" && planName.trim()) 
+      ? escapeHtml(planName.trim()) 
+      : "Wellwigen Subscription";
+
+    const subject = "Your Wellwigen Subscription Expires in 3 Days";
+
+    const textContent = `Hello ${safeName},
+
+This is a friendly reminder that your Wellwigen subscription is scheduled to expire on ${formattedDate}, which is 3 days from now.
+
+To continue enjoying our services without interruption, please renew your subscription before the expiry date.
+
+Thank you for being a part of Wellwigen.
+
+Best regards,
+Team Wellwigen`;
+
+    const htmlContent = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #E2E8F0; border-radius: 20px; color: #1E293B;">
+        <div style="border-bottom: 2px solid #F1F5F9; padding-bottom: 20px; margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: inline-block; padding: 8px 18px; background-color: #009688; border-radius: 10px; color: #ffffff; font-weight: 800; font-size: 18px; letter-spacing: 0.5px;">
+            WELLWIGEN
+          </div>
+          <span style="font-size: 11px; font-weight: 700; color: #009688; text-transform: uppercase; letter-spacing: 1px;">Subscription Alert</span>
+        </div>
+
+        <h3 style="color: #0F172A; font-size: 20px; font-weight: 800; margin: 0 0 16px 0;">
+          Subscription Expiry Reminder
+        </h3>
+
+        <p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 16px;">
+          Hello <strong>${escapedName}</strong>,
+        </p>
+
+        <p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 20px;">
+          This is a friendly reminder that your Wellwigen subscription is scheduled to expire on <strong>${escapeHtml(formattedDate)}</strong>, which is <strong>3 days from now</strong>.
+        </p>
+
+        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-left: 4px solid #009688; border-radius: 12px; padding: 18px; margin-bottom: 24px;">
+          <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 6px 0; color: #64748B; width: 140px;"><strong>Plan:</strong></td>
+              <td style="padding: 6px 0; color: #0F172A; font-weight: 600;">${safePlan}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #64748B;"><strong>Expiry Date:</strong></td>
+              <td style="padding: 6px 0; color: #D97706; font-weight: 700;">${escapeHtml(formattedDate)} (in 3 days)</td>
+            </tr>
+          </table>
+        </div>
+
+        <p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 20px;">
+          To continue enjoying our services without interruption, please renew your subscription before the expiry date.
+        </p>
+
+        <p style="font-size: 15px; line-height: 1.6; color: #334155; margin-bottom: 24px;">
+          Thank you for being a part of Wellwigen.
+        </p>
+
+        <div style="border-top: 1px solid #F1F5F9; padding-top: 20px; font-size: 14px; color: #475569;">
+          <p style="margin: 0 0 4px 0; font-weight: bold; color: #0F172A;">Best regards,</p>
+          <p style="margin: 0; color: #009688; font-weight: 700;">Team Wellwigen</p>
+        </div>
+      </div>
+    `;
+
+    const fromAddress = process.env.SMTP_USER 
+      ? `"Wellwigen" <${process.env.SMTP_USER}>` 
+      : `"Wellwigen" <no-reply@wellwigen.com>`;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: toEmail,
+      subject,
+      text: textContent,
+      html: htmlContent,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`✅ [EMAIL] 3-Day Expiry Reminder sent successfully. Message ID: ${info.messageId}`);
+
+    if (!isSmtpConfigured) {
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) {
+        console.log(`🔗 [EMAIL PREVIEW] ${previewUrl}`);
+      }
+    }
+
+    return { success: true, messageId: info.messageId };
+  } catch (err) {
+    console.error("❌ [EMAIL] Failed to send subscription expiry reminder email:", err.message);
+    return { success: false, error: err.message };
+  }
+};
+

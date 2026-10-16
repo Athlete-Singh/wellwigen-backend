@@ -102,11 +102,22 @@ const trainerSchema = new mongoose.Schema(
       default: "",
     },
     services: {
-      personalTraining: { type: Boolean, default: true },
-      groupClasses: { type: Boolean, default: true },
-      oneOnOnePriceMonthly: { type: Number, default: 4999 },
-      groupClassSeatPrice: { type: Number, default: 499 },
+      personalTraining: { type: Boolean, default: false },
+      groupClasses: { type: Boolean, default: false },
+      oneOnOnePriceMonthly: { type: Number, default: null },
+      groupClassSeatPrice: { type: Number, default: null },
+      oneOnOneSharePercent: { type: Number, default: null },
+      groupClassSharePercent: { type: Number, default: null },
     },
+    payout: {
+      upiId: { type: String, default: "" },
+      bankName: { type: String, default: "" },
+      accountNumber: { type: String, default: "" },
+      ifsc: { type: String, default: "" },
+      qrCodeUrl: { type: String, default: "" },
+    },
+    oneOnOneSharePercent: { type: Number, default: null },
+    groupClassSharePercent: { type: Number, default: null },
     timeSlots: {
       type: [String],
       default: [

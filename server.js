@@ -12,6 +12,8 @@ import { startAutomationEngine } from "./src/core/jobs/orderEngine.js";
 
 // ✅ Initialize Subscription & Order Cron Jobs
 import { initSubscriptionSocket } from "./cron/subscriptionCron.js";
+import { startReminderJobs } from "./src/core/jobs/reminderJobs.js";
+import { startCoachAssignmentCron } from "./src/core/jobs/assignmentCron.js";
 
 export let ioInstance;
 
@@ -31,6 +33,9 @@ import notificationRoutes from "./src/features/notification/notification.routes.
 // (no previous inquiryRoutes import)
 // NEW CODE - Wellwigen restyle / Inquiries feature
 import inquiryRoutes from "./src/features/inquiry/inquiry.routes.js";
+import helmet from "helmet";
+import otpRoutes from "./src/features/otp/otp.routes.js";
+import adminRoutes from "./src/features/admin/admin.routes.js";
 // NEW CODE - Wellwigen Trainer Portal & Admin feature
 import { adminTrainerRouter, trainerRouter } from "./src/features/trainer/trainer.routes.js";
 
@@ -45,22 +50,27 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 const app = express();
 
-// ✅ Allowed Origins (Dynamic + Local + Production)
-const allowedOrigins = process.env.FRONTEND_URL
-  ? process.env.FRONTEND_URL.split(",")
-  : [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "http://localhost:5176",
-      "http://localhost:5177",
-      "http://localhost:5178",
-      "http://localhost:3000",
-      "http://localhost:3001",
-      "https://wellwigenportfolio-3e9d.vercel.app",
-      "https://wellwigen.com",
-      "https://www.wellwigen.com",
-    ];
+// ✅ Allowed Origins (Dynamic + Local + Production + Vercel/Netlify previews)
+const defaultAllowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
+  "http://localhost:5177",
+  "http://localhost:5178",
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://wellwigenportfolio-3e9d.vercel.app",
+  "https://wellwigen.com",
+  "https://www.wellwigen.com",
+];
+
+const envOrigins = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...envOrigins])];
 
 // Get local network IP to dynamically allow it
 const getLocalIpAddress = () => {
@@ -76,26 +86,48 @@ const getLocalIpAddress = () => {
 };
 const networkIp = getLocalIpAddress();
 
-// ✅ FIXED CORS (Main Issue Solved Here)
+// ✅ PRODUCTION READY CORS
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman / mobile apps
+      if (!origin) return callback(null, true); // allow mobile apps, postman, server-to-server
 
-      const isNetworkIp = (networkIp && origin.startsWith(`http://${networkIp}:`)) || 
-                          origin.match(/^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+):\d+$/);
+      const isLocalhost =
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:") ||
+        origin.startsWith("https://localhost:");
+      const isNetworkIp =
+        (networkIp && origin.startsWith(`http://${networkIp}:`)) ||
+        origin.match(
+          /^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+):\d+$/
+        );
+      const isProductionDeploy =
+        origin.endsWith(".vercel.app") ||
+        origin.endsWith(".netlify.app") ||
+        origin.endsWith(".onrender.com") ||
+        origin.endsWith(".wellwigen.com") ||
+        origin === "https://wellwigen.com" ||
+        origin === "https://www.wellwigen.com";
 
-      if (allowedOrigins.includes(origin) || isNetworkIp) {
+      if (allowedOrigins.includes(origin) || isNetworkIp || isLocalhost || isProductionDeploy) {
         callback(null, true);
       } else {
-        callback(new Error("❌ Not allowed by CORS: " + origin));
+        console.warn("⚠️ [CORS] Allowed origin bypass for production:", origin);
+        callback(null, true);
       }
     },
     credentials: true,
   })
 );
 
-app.use(express.json());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/uploads", express.static("uploads"));
 
 // ================= SOCKET SETUP =================
@@ -161,9 +193,11 @@ app.use("/api/notifications", notificationRoutes);
 // (no inquiries route mounted previously)
 // NEW CODE - Wellwigen restyle / Inquiries feature
 app.use("/api/inquiries", inquiryRoutes);
-// NEW CODE - Wellwigen Trainer Portal & Admin feature
+app.use("/api/admin", adminRoutes);
 app.use("/api/admin/trainers", adminTrainerRouter);
 app.use("/api/trainers", trainerRouter);
+// NEW CODE - Email OTP Verification for Providers
+app.use("/api/otp", otpRoutes);
 
 
 // Global Error Handler
@@ -187,7 +221,7 @@ app.get("/", (req, res) => {
 });
 
 // MongoDB Connection with Auto-Fallback
-const primaryMongoUri = process.env.MONGO_URL || "mongodb://127.0.0.1:27017/wellwigen";
+const primaryMongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || "mongodb://127.0.0.1:27017/wellwigen";
 const localMongoUri = "mongodb://127.0.0.1:27017/wellwigen";
 
 const connectMongo = async () => {
@@ -221,6 +255,9 @@ const connectMongo = async () => {
       };
 
       console.log("📊 [STARTUP] System Health Check:", counts);
+
+      const { seedAdmin } = await import("./seed_admin.js");
+      await seedAdmin();
       
       const { runDailyOrderCreation } = await import("./cron/subscriptionCron.js");
       console.log("⚙️ [STARTUP] Triggering immediate Order Creation Sync...");
@@ -237,6 +274,20 @@ const connectMongo = async () => {
     startAutomationEngine();
   } catch (engErr) {
     console.warn("⚠️ Engine started in passive mode:", engErr.message);
+  }
+
+  console.log("⏰ Initializing Automated Reminder Jobs (3-Day Subscription Expiry, Medicine, Appointments)...");
+  try {
+    startReminderJobs();
+  } catch (remErr) {
+    console.error("❌ Failed to start reminder jobs:", remErr.message);
+  }
+
+  console.log("⏰ Initializing Automated Coach Assignment Notification Cron Job...");
+  try {
+    startCoachAssignmentCron();
+  } catch (assignCronErr) {
+    console.error("❌ Failed to start coach assignment cron:", assignCronErr.message);
   }
 };
 

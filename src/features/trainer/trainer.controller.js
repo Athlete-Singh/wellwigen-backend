@@ -1,5 +1,85 @@
+import mongoose from "mongoose";
 import Trainer from "./trainer.model.js";
+import Notification from "../notification/notification.model.js";
 import nodemailer from "nodemailer";
+
+// Helper to notify Admin when a new trainer submits application requiring approval
+const sendAdminTrainerAlert = async (trainer, applicationId) => {
+  try {
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.log("ℹ️ [ADMIN_ALERT] SMTP not configured; notification logged to DB and socket.");
+      return;
+    }
+
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.SMTP_USER;
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || "smtp.gmail.com",
+      port: parseInt(process.env.SMTP_PORT || "587"),
+      secure: process.env.SMTP_PORT === "465",
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const portalUrl = process.env.FRONTEND_URL 
+      ? `${process.env.FRONTEND_URL.split(",")[0]}/admin/panel`
+      : "http://localhost:5177/admin/panel";
+
+    await transporter.sendMail({
+      from: `"Wellwigen Coach System" <${process.env.SMTP_USER}>`,
+      to: adminEmail,
+      subject: `🚨 New Coach Application: ${trainer.name} (${applicationId}) - Needs Approval`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+          <div style="border-bottom: 2px solid #f1f5f9; padding-bottom: 16px; margin-bottom: 20px;">
+            <h2 style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800;">WELLWIGEN ADMIN ALERT</h2>
+            <span style="font-size: 11px; font-weight: 700; color: #0d9488; text-transform: uppercase;">Coach Application &bull; Pending Approval</span>
+          </div>
+          <div style="background: #fffbeb; border: 1px solid #fde68a; padding: 18px; border-radius: 12px; margin: 16px 0;">
+            <h3 style="color: #b45309; margin: 0 0 6px 0; font-size: 16px;">Action Required: Coach Awaiting Approval</h3>
+            <p style="color: #92400e; font-size: 14px; margin: 0;">
+              <strong>${trainer.name}</strong> has submitted their credentials and is waiting for your review and approval.
+            </p>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
+            <tr>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Coach Name:</td>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a; font-weight: 700;">${trainer.name}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Email:</td>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">${trainer.email}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Phone:</td>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">${trainer.phone || "Not provided"}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Specialization:</td>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #0f172a;">${trainer.specialization || "Fitness Coach"}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #64748b; font-weight: 600;">Application ID:</td>
+              <td style="padding: 10px 0; border-bottom: 1px solid #f1f5f9; color: #0d9488; font-weight: 800; font-family: monospace;">${applicationId}</td>
+            </tr>
+          </table>
+          <div style="margin: 24px 0;">
+            <a href="${portalUrl}" style="display: inline-block; background-color: #0d9488; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 700; font-size: 14px;">
+              Open Admin Portal &rarr; Review &amp; Approve
+            </a>
+          </div>
+          <p style="font-size: 12px; color: #94a3b8; border-top: 1px solid #f1f5f9; padding-top: 14px; margin-top: 24px;">
+            This is an automated administrative notification dispatched by Wellwigen Backend.
+          </p>
+        </div>
+      `,
+    });
+    console.log(`✉️ [ADMIN_ALERT] Sent trainer application email alert to: ${adminEmail}`);
+  } catch (err) {
+    console.warn(`⚠️ [ADMIN_ALERT] Could not send admin email alert: ${err.message}`);
+  }
+};
 
 // Helper to send email notification to trainer on status change
 const sendStatusNotificationEmail = async (trainer, newStatus, rejectionReason) => {
@@ -171,17 +251,31 @@ export const getAdminTrainerById = async (req, res) => {
 */
 // NEW CODE - Flexible ID query supporting both ObjectId and string ID
 const findTrainerRecord = async (id) => {
-  return await Trainer.findOne({
-    $or: [{ _id: id }, { id: id }, { applicationId: id }],
-  });
+  const queryConditions = [
+    { _id: id },
+    { id: id },
+    { applicationId: id },
+    { email: id },
+  ];
+  if (mongoose.Types.ObjectId.isValid(id) && typeof id === "string" && id.length === 24) {
+    queryConditions.unshift({ _id: new mongoose.Types.ObjectId(id) });
+  }
+  return await Trainer.findOne({ $or: queryConditions });
 };
 
 export const getAdminTrainerById = async (req, res) => {
   try {
     const { id } = req.params;
-    const trainer = await Trainer.findOne({
-      $or: [{ _id: id }, { id: id }, { applicationId: id }],
-    }).lean();
+    const queryConditions = [
+      { _id: id },
+      { id: id },
+      { applicationId: id },
+      { email: id },
+    ];
+    if (mongoose.Types.ObjectId.isValid(id) && typeof id === "string" && id.length === 24) {
+      queryConditions.unshift({ _id: new mongoose.Types.ObjectId(id) });
+    }
+    const trainer = await Trainer.findOne({ $or: queryConditions }).lean();
 
     if (!trainer) {
       return res.status(404).json({
@@ -264,6 +358,50 @@ export const updateTrainerStatus = async (req, res) => {
   }
 };
 
+// DELETE /api/admin/trainers/:id
+export const deleteTrainer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Trainer ID is required" });
+    }
+
+    const queryConditions = [
+      { _id: id },
+      { id: id },
+      { applicationId: id },
+      { email: id },
+    ];
+    if (mongoose.Types.ObjectId.isValid(id) && typeof id === "string" && id.length === 24) {
+      queryConditions.unshift({ _id: new mongoose.Types.ObjectId(id) });
+    }
+
+    const deleted = await Trainer.findOneAndDelete({ $or: queryConditions });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Trainer profile not found",
+      });
+    }
+
+    console.log(`🗑️ [TRAINER_ADMIN] Deleted trainer: ${deleted.name} (${deleted.email})`);
+
+    return res.json({
+      success: true,
+      message: `Coach ${deleted.name} has been permanently deleted from registry.`,
+      trainer: deleted,
+    });
+  } catch (err) {
+    console.error("❌ [TRAINER_ADMIN] Error in deleteTrainer:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete trainer profile",
+      error: err.message,
+    });
+  }
+};
+
 // ================= PUBLIC / TRAINER CONTROLLERS =================
 
 // GET /api/trainers/approved
@@ -335,7 +473,7 @@ export const registerTrainer = async (req, res) => {
 // POST /api/trainers/submit-onboarding
 export const submitOnboarding = async (req, res) => {
   try {
-    const { email, ...data } = req.body;
+    const { email, _id, id: rawId, ...data } = req.body;
 
     if (!email) {
       return res.status(400).json({
@@ -356,6 +494,54 @@ export const submitOnboarding = async (req, res) => {
       },
       { new: true, upsert: true }
     );
+
+    // 1. Create in-app Admin Notification in MongoDB
+    try {
+      await Notification.create({
+        role: "admin",
+        title: "New Coach Application Submitted",
+        body: `${updated.name} has submitted their trainer onboarding application (${applicationId}) and is waiting for your review and approval.`,
+        data: {
+          trainerId: updated._id,
+          trainerName: updated.name,
+          trainerEmail: updated.email,
+          applicationId,
+          specialization: updated.specialization,
+          type: "trainer_application",
+        },
+      });
+    } catch (notifErr) {
+      console.warn("⚠️ [NOTIFICATION] Error saving admin notification:", notifErr.message);
+    }
+
+    // 2. Real-time broadcast to Admin via Socket.io
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("newTrainerApplication", {
+          trainer: updated,
+          applicationId,
+          message: `${updated.name} submitted their trainer application and wants approval.`,
+        });
+        io.emit("adminNotification", {
+          title: "New Coach Application Submitted",
+          body: `${updated.name} has submitted their trainer application and is waiting for your approval.`,
+          data: {
+            trainerId: updated._id,
+            trainerName: updated.name,
+            applicationId,
+            type: "trainer_application",
+          },
+        });
+      }
+    } catch (socketErr) {
+      console.warn("⚠️ [SOCKET] Socket notification broadcast notice:", socketErr.message);
+    }
+
+    // 3. Dispatch automated email alert to admin
+    sendAdminTrainerAlert(updated, applicationId).catch(() => {});
+
+    console.log(`📣 [TRAINER_SUBMISSION] Trainer ${updated.name} (${applicationId}) submitted application. Admin notified.`);
 
     return res.json({
       success: true,
@@ -395,3 +581,157 @@ export const getTrainerStatus = async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+
+// PATCH /api/trainers/profile
+export const updateTrainerProfile = async (req, res) => {
+  try {
+    const { email, services, ...otherUpdates } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email required" });
+    }
+
+    const trainer = await Trainer.findOne({ email: email.toLowerCase().trim() });
+    if (!trainer) {
+      return res.status(404).json({ success: false, message: "Trainer not found" });
+    }
+
+    if (services) {
+      trainer.services = {
+        ...(trainer.services || {}),
+        ...services,
+      };
+      trainer.markModified("services");
+    }
+
+    if (otherUpdates.payout) {
+      trainer.payout = {
+        ...(trainer.payout || {}),
+        ...otherUpdates.payout,
+      };
+      trainer.markModified("payout");
+    }
+
+    Object.keys(otherUpdates).forEach((key) => {
+      if (key !== "email" && key !== "_id" && key !== "payout") {
+        trainer[key] = otherUpdates[key];
+      }
+    });
+
+    await trainer.save();
+
+    return res.json({
+      success: true,
+      trainer,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ================= ADMIN: ASSIGN COACH TO CLIENT OR GROUP =================
+export const assignCoachToTarget = async (req, res) => {
+  try {
+    const {
+      assignmentType = "client",
+      targetId = "",
+      targetName,
+      targetEmail = "",
+      targetPhone = "",
+      targetGoal = "General Fitness",
+      plan = "Personal Training",
+      totalSessions = 12,
+      coachName,
+      coachId = "",
+      coachEmail = "",
+      coachPhone = "",
+      adminNotes = "",
+      assignedBy = "admin",
+    } = req.body;
+
+    if (!targetName) {
+      return res.status(400).json({ success: false, message: "Target name is required." });
+    }
+
+    if (!coachName || coachName === "Unassigned") {
+      return res.json({
+        success: true,
+        message: "Client status kept as Unassigned (No notification queued).",
+      });
+    }
+
+    const { createCoachAssignment } = await import("../../core/jobs/assignmentCron.js");
+
+    const assignment = await createCoachAssignment({
+      assignmentType,
+      targetId,
+      targetName,
+      targetEmail,
+      targetPhone,
+      targetGoal,
+      plan,
+      totalSessions,
+      coachId,
+      coachName,
+      coachEmail,
+      coachPhone,
+      adminNotes,
+      assignedBy,
+    });
+
+    return res.json({
+      success: true,
+      message: `Coach "${coachName}" successfully assigned to ${targetName}. Automated cron job will dispatch Panel, WhatsApp, and Email notifications!`,
+      assignment,
+    });
+  } catch (error) {
+    console.error("❌ [ASSIGN_COACH] Error assigning coach:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ================= TRAINER: GET ASSIGNMENTS & NOTIFICATIONS =================
+export const getTrainerAssignments = async (req, res) => {
+  try {
+    const { email, coachId, name } = req.query;
+    const CoachAssignment = (await import("./coachAssignment.model.js")).default;
+
+    let query = {};
+    if (coachId) {
+      query.$or = [{ coachId }, { coachEmail: email?.toLowerCase() }, { coachName: name }];
+    } else if (email) {
+      query.$or = [{ coachEmail: email.toLowerCase() }, { coachName: name }];
+    } else if (name) {
+      query.coachName = new RegExp(`^${name.trim()}$`, "i");
+    }
+
+    let assignments = [];
+    if (mongoose.connection.readyState === 1) {
+      assignments = await CoachAssignment.find(query).sort({ createdAt: -1 }).limit(50);
+    }
+
+    return res.json({
+      success: true,
+      count: assignments.length,
+      assignments,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ================= SYSTEM / ADMIN: MANUALLY TRIGGER ASSIGNMENT CRON =================
+export const triggerCoachAssignmentCronManually = async (req, res) => {
+  try {
+    const { runCoachAssignmentCron } = await import("../../core/jobs/assignmentCron.js");
+    const result = await runCoachAssignmentCron();
+    return res.json({
+      success: true,
+      message: "Automated Coach Assignment Cron executed successfully.",
+      result,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+

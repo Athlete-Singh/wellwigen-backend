@@ -7,6 +7,7 @@ import {
   deleteInquiry,
   replyEmail,
   markContacted,
+  convertToClient,
 } from "./inquiry.controller.js";
 
 const router = express.Router();
@@ -24,5 +25,7 @@ router.patch("/:id/contacted", markContacted);
 router.post("/:id/contacted", markContacted);
 router.patch("/:id/mark-contacted", markContacted);
 router.post("/:id/mark-contacted", markContacted);
+router.post("/:id/convert-to-client", convertToClient);
+router.patch("/:id/convert-to-client", convertToClient);
 
 export default router;
