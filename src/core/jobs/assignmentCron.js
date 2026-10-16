@@ -4,7 +4,13 @@ import nodemailer from "nodemailer";
 import CoachAssignment from "../../features/trainer/coachAssignment.model.js";
 import Trainer from "../../features/trainer/trainer.model.js";
 import Notification from "../../features/notification/notification.model.js";
-import { sendAutomatedWhatsApp, formatWhatsAppNumber } from "../services/whatsapp.js";
+import {
+  sendAutomatedWhatsApp,
+  formatWhatsAppNumber,
+  notifyAdminWhatsApp,
+  ADMIN_EMAIL,
+  ADMIN_PHONE,
+} from "../services/whatsapp.js";
 import { ioInstance } from "../../../server.js";
 
 // In-memory queue fallback if MongoDB is in offline mode
@@ -457,6 +463,13 @@ export const runCoachAssignmentCron = async () => {
         } else {
           console.log(`  ℹ️ [EMAIL] Skipped: No email address registered for Coach ${assignment.coachName}`);
         }
+
+        // Alert Superadmin on WhatsApp (+91 9598506627)
+        notifyAdminWhatsApp({
+          title: "COACH ASSIGNMENT EXECUTED",
+          message: `🎯 Coach: ${assignment.coachName} (${assignment.coachEmail || "N/A"})\n👤 Assigned Trainee: ${assignment.targetName}\n📞 Trainee Phone: ${assignment.targetPhone || "N/A"}\n🏋️ Plan: ${assignment.plan || "Custom Plan"}\n📊 Sessions: ${assignment.totalSessions || 12}\n\nNotifications dispatched to Coach & Client.`,
+          link: "https://wellwigen.com/admin",
+        }).catch(() => {});
 
         // ---------------- 4. UPDATE ASSIGNMENT RECORD ----------------
         const updatePayload = {

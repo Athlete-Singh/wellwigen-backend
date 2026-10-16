@@ -12,6 +12,9 @@ import {
   sendAutomatedWhatsApp,
   buildWhatsAppUrl,
   formatWhatsAppNumber,
+  notifyAdminWhatsApp,
+  ADMIN_PHONE,
+  ADMIN_EMAIL,
 } from "../../core/services/whatsapp.js";
 
 // In-memory rate limiting map (IP -> timestamp)
@@ -365,6 +368,15 @@ export const createInquiry = async (req, res) => {
       preferredTiming,
       message,
       id: finalId,
+    });
+
+    // 5. Instantly alert Superadmin via WhatsApp (+91 9598506627)
+    notifyAdminWhatsApp({
+      title: "NEW CLIENT LEAD / INQUIRY",
+      message: `👤 Client: ${fullName}\n📞 Phone: ${phoneClean}\n✉️ Email: ${email}\n🏋️ Program: ${program}\n💎 Plan: ${plan || "Trial Class"}\n🎯 Goal: ${fitnessGoal || "General Fitness"}\n⏰ Preferred Time: ${preferredTiming || "Flexible"}${message ? `\n💬 Note: "${message}"` : ""}`,
+      link: "https://wellwigen.com/admin",
+    }).catch((waErr) => {
+      console.warn("⚠️ [INQUIRY] Admin WhatsApp alert notice:", waErr.message);
     });
 
     return res.status(201).json({

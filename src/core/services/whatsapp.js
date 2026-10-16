@@ -6,6 +6,10 @@
  * 3. Twilio WhatsApp API (if configured in env)
  */
 
+export const ADMIN_PHONE = "+919598506627";
+export const ADMIN_PHONE_RAW = "919598506627";
+export const ADMIN_EMAIL = "wellwigen@gmail.com";
+
 export const formatWhatsAppNumber = (phoneStr) => {
   if (!phoneStr) return "";
   let digits = String(phoneStr).replace(/\D/g, "");
@@ -114,4 +118,20 @@ export const sendAutomatedWhatsApp = async ({ recipientPhone, recipientName, pro
     directUrl: waDirectUrl,
     message: defaultText,
   };
+};
+
+/**
+ * Dispatch instant WhatsApp alert directly to Superadmin (+91 9598506627)
+ */
+export const notifyAdminWhatsApp = async ({ title, message, link }) => {
+  const adminPhone = process.env.ADMIN_WHATSAPP || process.env.ADMIN_PHONE || ADMIN_PHONE;
+  const consoleLink = link || "https://wellwigen.com/admin";
+  const fullText = `🔔 *WELLWIGEN ADMIN ALERT*\n📌 *${title}*\n\n${message}\n\n🔗 *Console:* ${consoleLink}`;
+
+  console.log(`📱 [ADMIN_WHATSAPP] Routing alert to Superadmin (${adminPhone}): "${title}"`);
+  return await sendAutomatedWhatsApp({
+    recipientPhone: adminPhone,
+    recipientName: "Wellwigen Admin",
+    customMessage: fullText,
+  });
 };

@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { notifyAdminWhatsApp } from "../services/whatsapp.js";
 
 /**
  * Sends credentials to the approved provider.
@@ -189,6 +190,13 @@ export const sendContactEmail = async (name, email, phone, company, subject, mes
 
     const info = await transporter.sendMail(mailOptions);
     console.log(`✅ [EMAIL] Contact email sent successfully. Message ID: ${info.messageId}`);
+
+    // Alert Superadmin on WhatsApp (+91 9598506627)
+    notifyAdminWhatsApp({
+      title: "NEW CONTACT FORM QUERY",
+      message: `👤 Sender: ${name}\n✉️ Email: ${email}\n📞 Phone: ${phone || 'N/A'}\n🏢 Company: ${company || 'N/A'}\n📌 Subject: ${subject}\n\n💬 Message:\n"${message}"`,
+      link: "https://wellwigen.com/admin",
+    }).catch(() => {});
     
     if (!isSmtpConfigured) {
       const previewUrl = nodemailer.getTestMessageUrl(info);

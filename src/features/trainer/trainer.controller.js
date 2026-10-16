@@ -2,16 +2,29 @@ import mongoose from "mongoose";
 import Trainer from "./trainer.model.js";
 import Notification from "../notification/notification.model.js";
 import nodemailer from "nodemailer";
+import { notifyAdminWhatsApp, ADMIN_EMAIL, ADMIN_PHONE } from "../../core/services/whatsapp.js";
 
 // Helper to notify Admin when a new trainer submits application requiring approval
 const sendAdminTrainerAlert = async (trainer, applicationId) => {
   try {
+    // 1. Dispatch Instant WhatsApp Alert to Superadmin (+91 9598506627)
+    try {
+      await notifyAdminWhatsApp({
+        title: "NEW COACH APPLICATION - NEEDS APPROVAL",
+        message: `👤 Coach Name: ${trainer.name}\n📞 Phone: ${trainer.phone || "N/A"}\n✉️ Email: ${trainer.email}\n🏆 Specialization: ${trainer.specialization || "Fitness Coach"}\n🆔 Application ID: ${applicationId}\n\nAction Required: Review credentials & approve on admin panel.`,
+        link: "https://wellwigen.com/admin",
+      });
+      console.log(`📱 [ADMIN_ALERT] WhatsApp alert sent to Superadmin for Coach ${trainer.name}`);
+    } catch (waErr) {
+      console.warn("⚠️ [ADMIN_ALERT] WhatsApp alert dispatch warning:", waErr.message);
+    }
+
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.log("ℹ️ [ADMIN_ALERT] SMTP not configured; notification logged to DB and socket.");
+      console.log("ℹ️ [ADMIN_ALERT] SMTP not configured; notification logged to DB, socket, and WhatsApp.");
       return;
     }
 
-    const adminEmail = process.env.ADMIN_EMAIL || process.env.SMTP_USER;
+    const adminEmail = process.env.ADMIN_EMAIL || ADMIN_EMAIL || "wellwigen@gmail.com";
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || "smtp.gmail.com",
       port: parseInt(process.env.SMTP_PORT || "587"),
@@ -22,9 +35,7 @@ const sendAdminTrainerAlert = async (trainer, applicationId) => {
       },
     });
 
-    const portalUrl = process.env.FRONTEND_URL 
-      ? `${process.env.FRONTEND_URL.split(",")[0]}/admin/panel`
-      : "http://localhost:5177/admin/panel";
+    const portalUrl = "https://wellwigen.com/admin";
 
     await transporter.sendMail({
       from: `"Wellwigen Coach System" <${process.env.SMTP_USER}>`,
@@ -170,6 +181,13 @@ const sendStatusNotificationEmail = async (trainer, newStatus, rejectionReason) 
     });
 
     console.log(`✉️ [EMAIL] Status notification sent to trainer: ${trainer.email} (${newStatus})`);
+
+    // Also alert Superadmin
+    notifyAdminWhatsApp({
+      title: `COACH STATUS UPDATED: ${newStatus.toUpperCase()}`,
+      message: `👤 Coach: ${trainer.name}\n✉️ Email: ${trainer.email}\nStatus: ${newStatus.toUpperCase()}${rejectionReason ? `\nReason: ${rejectionReason}` : ''}`,
+      link: "https://wellwigen.com/admin",
+    }).catch(() => {});
   } catch (err) {
     console.warn(`⚠️ [EMAIL] Failed to send status notification email: ${err.message}`);
   }
