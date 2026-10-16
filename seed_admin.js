@@ -18,10 +18,13 @@ export async function seedAdmin() {
     const hashedPassword = await bcrypt.hash(adminPassword, salt);
 
     const adminsToSeed = [
-      { username: (process.env.ADMIN_USERNAME || "wellwigen.gate").trim().toLowerCase() },
-      { username: (process.env.ADMIN_EMAIL || "wellwigen@gmail.com").trim().toLowerCase() },
-      { username: "wellwigen@gmail.com" },
+      { username: "admin@gmail.com" },
+      { username: "admin" },
+      { username: "admin@wellwigen.com" },
       { username: "wellwigen.gate" },
+      { username: "wellwigen@gmail.com" },
+      { username: (process.env.ADMIN_USERNAME || "admin@gmail.com").trim().toLowerCase() },
+      { username: (process.env.ADMIN_EMAIL || "admin@gmail.com").trim().toLowerCase() },
     ];
 
     // Deduplicate usernames
