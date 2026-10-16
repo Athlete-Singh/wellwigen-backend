@@ -1,24 +1,5 @@
 [
   {
-    "_id": "loc_1792130977382_lu85q",
-    "id": "loc_1792130977382",
-    "fullName": "Test Deletion Target",
-    "email": "testdelete@test.com",
-    "phone": "9999999999",
-    "program": "General Inquiry",
-    "plan": "",
-    "fitnessGoal": "",
-    "preferredTiming": "",
-    "message": "Testing delete functionality",
-    "status": "New",
-    "adminNotes": "",
-    "contactedVia": "none",
-    "lastContactedAt": null,
-    "ip": "::1",
-    "createdAt": "2026-10-16T06:09:37.382Z",
-    "updatedAt": "2026-10-16T06:09:37.383Z"
-  },
-  {
     "_id": "loc_1791959603807_r22dk",
     "id": "loc_1791959603807",
     "fullName": "Aditya Singh",

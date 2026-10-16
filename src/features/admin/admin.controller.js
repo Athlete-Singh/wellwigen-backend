@@ -39,13 +39,22 @@ export const adminLogin = async (req, res) => {
     const acceptedMasterPasswords = [
       masterPass,
       "bodyfit@wwg",
+      "bodyfit.wwg",
+      "bodyfit",
       "admin123",
       "Admin@123",
+      "admin@123",
       "Wellwigen@2026",
+      "wellwigen@2026",
+      "wellwigen.2026",
     ];
 
-    const isMasterIdentifier = masterIdentifiers.includes(identifier);
-    const isMasterPassword = acceptedMasterPasswords.includes(password.trim());
+    const isMasterIdentifier = masterIdentifiers.some(
+      (m) => m && m.toLowerCase() === identifier.trim().toLowerCase()
+    );
+    const isMasterPassword = acceptedMasterPasswords.some(
+      (p) => p && p.toLowerCase() === password.trim().toLowerCase()
+    );
 
     // 1. Direct check against master admin credentials
     if (isMasterIdentifier && isMasterPassword) {
