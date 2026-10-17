@@ -384,14 +384,19 @@ export const deleteTrainer = async (req, res) => {
       return res.status(400).json({ success: false, message: "Trainer ID is required" });
     }
 
+    const decoded = decodeURIComponent(id).trim();
+
     const queryConditions = [
-      { _id: id },
-      { id: id },
-      { applicationId: id },
-      { email: id },
+      { id: decoded },
+      { applicationId: decoded },
+      { email: decoded.toLowerCase() },
+      { email: decoded },
     ];
-    if (mongoose.Types.ObjectId.isValid(id) && typeof id === "string" && id.length === 24) {
-      queryConditions.unshift({ _id: new mongoose.Types.ObjectId(id) });
+
+    if (mongoose.Types.ObjectId.isValid(decoded) && typeof decoded === "string" && decoded.length === 24) {
+      queryConditions.unshift({ _id: new mongoose.Types.ObjectId(decoded) });
+    } else {
+      queryConditions.push({ _id: decoded });
     }
 
     const deleted = await Trainer.findOneAndDelete({ $or: queryConditions });
